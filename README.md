@@ -12,6 +12,8 @@ To use NAG, simply replace the `CFGGuider` node in your workflow with `NAGCFGGui
 
 Example workflows are available in the `./workflows` directory!
 
+![comfyui-nag](workflow.png)
+
 ## Key Inputs
 
 We recommend tuning `nag_scale` for most use cases.
