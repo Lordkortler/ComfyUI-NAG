@@ -2,7 +2,7 @@
 
 Implementation of [Normalized Attention Guidance: Universal Negative Guidance for Diffusion Models](https://chendaryen.github.io/NAG.github.io/) for [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
-NAG restores effective negative prompting in few-step diffusion models.
+NAG restores effective negative prompting in few-step diffusion models, and complements CFG in multi-step sampling for improved quality and control.
 
 We currently support `Flux`, `SD3.5` and `SDXL`.
 
