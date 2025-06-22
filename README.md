@@ -4,11 +4,19 @@ Implementation of [Normalized Attention Guidance: Universal Negative Guidance fo
 
 NAG restores effective negative prompting in few-step diffusion models, and complements CFG in multi-step sampling for improved quality and control.
 
-We currently support `Flux`, `SD3.5` and `SDXL`.
+Paper: https://arxiv.org/abs/2505.21179
+
+Code: https://github.com/ChenDarYen/Normalized-Attention-Guidance
+
+Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
+
+Wan2.1 Demo: https://huggingface.co/spaces/ChenDY/NAG_wan2-1-fast
 
 ## Usage
 
 To use NAG, simply replace the `CFGGuider` node in your workflow with `NAGCFGGuider`.
+
+We currently support `Flux`, `SD3.5` and `SDXL`.
 
 Example workflows are available in the `./workflows` directory!
 
