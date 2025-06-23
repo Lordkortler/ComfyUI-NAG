@@ -152,13 +152,16 @@ class NAGChroma(Chroma):
             **kwargs,
     ):
         assert nag_negative_context is not None
-        context = cat_context(context, nag_negative_context)
+        origin_context_len = context.shape[1]
+        context = cat_context(context, nag_negative_context, trim_context=True)
+        context_pad_len = context.shape[1] - origin_context_len
         nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
         for block in self.double_blocks:
             block.forward = MethodType(
                 partial(
                     NAGDoubleStreamBlock.forward,
+                    context_pad_len=context_pad_len,
                     nag_pad_len=nag_pad_len,
                 ),
                 block,
@@ -169,6 +172,7 @@ class NAGChroma(Chroma):
                     NAGSingleStreamBlock.forward,
                     txt_length=context.shape[1],
                     origin_bsz=nag_negative_context.shape[0],
+                    context_pad_len=context_pad_len,
                     nag_pad_len=nag_pad_len,
                 ),
                 block,

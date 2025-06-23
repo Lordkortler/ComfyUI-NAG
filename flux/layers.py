@@ -28,6 +28,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             attn_mask=None,
             modulation_dims_img=None,
             modulation_dims_txt=None,
+            context_pad_len: int = None,
             nag_pad_len: int = None,
     ):
         origin_bsz = len(txt) - len(img)
@@ -52,15 +53,16 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
                                                                                                               1, 4)
         txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
 
-        txt_q_negative, txt_q = txt_q[-origin_bsz:, :, nag_pad_len:], txt_q[:-origin_bsz]
-        txt_k_negative, txt_k = txt_k[-origin_bsz:, :, nag_pad_len:], txt_k[:-origin_bsz]
-        txt_v_negative, txt_v = txt_v[-origin_bsz:, :, nag_pad_len:], txt_v[:-origin_bsz]
+        txt_q_negative, txt_q = txt_q[-origin_bsz:, :, nag_pad_len:], txt_q[:-origin_bsz, :, context_pad_len:]
+        txt_k_negative, txt_k = txt_k[-origin_bsz:, :, nag_pad_len:], txt_k[:-origin_bsz, :, context_pad_len:]
+        txt_v_negative, txt_v = txt_v[-origin_bsz:, :, nag_pad_len:], txt_v[:-origin_bsz, :, context_pad_len:]
 
         img_q_negative = img_q[-origin_bsz:]
         img_k_negative = img_k[-origin_bsz:]
         img_v_negative = img_v[-origin_bsz:]
 
         pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
+        pe = pe[:, :, context_pad_len:]
 
         if self.flipped_img_txt:
             # run actual attention
@@ -95,7 +97,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             )
 
             txt_attn_negative, img_attn_negative = attn_negative[:, : txt.shape[1] - nag_pad_len], attn_negative[:, txt.shape[1] - nag_pad_len:]
-            txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1]:]
+            txt_attn, img_attn = attn[:, : txt.shape[1] - context_pad_len], attn[:, txt.shape[1] - context_pad_len:]
 
         # NAG
         img_attn_positive = img_attn[-origin_bsz:]
@@ -118,7 +120,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             img_mod2.gate, None, modulation_dims_img)
 
         # calculate the txt bloks
-        txt[:-origin_bsz] += apply_mod(self.txt_attn.proj(txt_attn), txt_mod1.gate[:-origin_bsz], None, modulation_dims_txt)
+        txt[:-origin_bsz, context_pad_len:] += apply_mod(self.txt_attn.proj(txt_attn), txt_mod1.gate[:-origin_bsz], None, modulation_dims_txt)
         txt[-origin_bsz:, nag_pad_len:] += apply_mod(self.txt_attn.proj(txt_attn_negative), txt_mod1.gate[-origin_bsz:], None, modulation_dims_txt)
         txt += apply_mod(
             self.txt_mlp(apply_mod(self.txt_norm2(txt), (1 + txt_mod2.scale), txt_mod2.shift, modulation_dims_txt)),
@@ -154,6 +156,7 @@ class NAGSingleStreamBlock(SingleStreamBlock):
 
             txt_length:int = None,
             origin_bsz: int = None,
+            context_pad_len: int = None,
             nag_pad_len: int = None,
     ) -> Tensor:
         mod= self.modulation(vec)[0]
@@ -163,18 +166,19 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         q, k = self.norm(q, k, v)
 
         # NAG
-        q, q_negative = q[:-origin_bsz], q[-origin_bsz:, :, nag_pad_len:]
-        k, k_negative = k[:-origin_bsz], k[-origin_bsz:, :, nag_pad_len:]
-        v, v_negative = v[:-origin_bsz], v[-origin_bsz:, :, nag_pad_len:]
+        q, q_negative = q[:-origin_bsz, :, context_pad_len:], q[-origin_bsz:, :, nag_pad_len:]
+        k, k_negative = k[:-origin_bsz, :, context_pad_len:], k[-origin_bsz:, :, nag_pad_len:]
+        v, v_negative = v[:-origin_bsz, :, context_pad_len:], v[-origin_bsz:, :, nag_pad_len:]
 
         pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
+        pe = pe[:, :, context_pad_len:]
 
         # compute attention
         attn_negative = attention(q_negative, k_negative, v_negative, pe=pe_negative, mask=attn_mask)
         attn = attention(q, k, v, pe=pe, mask=attn_mask)
 
         img_attn_negative = attn_negative[:, txt_length - nag_pad_len:]
-        img_attn = attn[:, txt_length:]
+        img_attn = attn[:, txt_length - context_pad_len:]
 
         img_attn_positive = img_attn[-origin_bsz:]
 
@@ -188,13 +192,13 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         img_attn_guidance = img_attn_guidance * self.nag_alpha + img_attn_positive * (1 - self.nag_alpha)
 
         attn_negative[:, txt_length - nag_pad_len:] = img_attn_guidance
-        attn[-origin_bsz:, txt_length:] = img_attn_guidance
+        attn[-origin_bsz:, txt_length - context_pad_len:] = img_attn_guidance
 
         # compute activation in mlp stream, cat again and run second linear layer
         output_negative = self.linear2(torch.cat((attn_negative, self.mlp_act(mlp[-origin_bsz:, nag_pad_len:])), 2))
-        output = self.linear2(torch.cat((attn, self.mlp_act(mlp[:-origin_bsz])), 2))
+        output = self.linear2(torch.cat((attn, self.mlp_act(mlp[:-origin_bsz, context_pad_len:])), 2))
 
-        x[:-origin_bsz] += apply_mod(output, mod.gate[:-origin_bsz], None, modulation_dims)
+        x[:-origin_bsz, context_pad_len:] += apply_mod(output, mod.gate[:-origin_bsz], None, modulation_dims)
         x[-origin_bsz:, nag_pad_len:] += apply_mod(output_negative, mod.gate[-origin_bsz:], None, modulation_dims)
         if x.dtype == torch.float16:
             x = torch.nan_to_num(x, nan=0.0, posinf=65504, neginf=-65504)
