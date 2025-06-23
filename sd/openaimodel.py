@@ -44,15 +44,10 @@ def set_nag_sd(model: UNetModel, nag_negative_cond, nag_scale, nag_tau, nag_alph
     )
     for name, module in model.named_modules():
         if "attn2" in name and isinstance(module, CrossAttention):
-            module.forward = MethodType(
-                partial(
-                    NAGCrossAttention.forward,
-                    nag_scale=nag_scale,
-                    nag_tau=nag_tau,
-                    nag_alpha=nag_alpha,
-                ),
-                module,
-            )
+            module.nag_scale = nag_scale
+            module.nag_tau = nag_tau
+            module.nag_alpha = nag_alpha
+            module.forward = MethodType(NAGCrossAttention.forward, module)
 
 
 def set_origin_sd(model: NAGUnetModel):

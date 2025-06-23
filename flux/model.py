@@ -146,6 +146,12 @@ class NAGFlux(Flux):
         context = torch.cat((context, nag_negative_context[:, :context.shape[1]].to(context)), dim=0)
         y = torch.cat((y, nag_negative_y.to(y)), dim=0)
 
+        for block in self.single_blocks:
+            block.forward = MethodType(
+                partial(NAGSingleStreamBlock.forward, txt_length=context.shape[1], origin_bsz=nag_negative_context.shape[0]),
+                block,
+            )
+
         bs, c, h, w = x.shape
         patch_size = self.patch_size
         x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
@@ -175,27 +181,15 @@ def set_nag_flux(model: Flux, nag_negative_cond, nag_scale, nag_tau, nag_alpha):
         model
     )
     for block in model.double_blocks:
-        block.forward = MethodType(
-            partial(
-                NAGDoubleStreamBlock.forward,
-                nag_scale=nag_scale,
-                nag_tau=nag_tau,
-                nag_alpha=nag_alpha,
-            ),
-            block
-        )
+        block.nag_scale = nag_scale
+        block.nag_tau = nag_tau
+        block.nag_alpha = nag_alpha
+        block.forward = MethodType(NAGDoubleStreamBlock.forward, block)
     for block in model.single_blocks:
-        block.forward = MethodType(
-            partial(
-                NAGSingleStreamBlock.forward,
-                nag_scale=nag_scale,
-                nag_tau=nag_tau,
-                nag_alpha=nag_alpha,
-                txt_length=nag_negative_cond[0][0].shape[1],
-                origin_bsz=len(nag_negative_cond[0][0]),
-            ),
-            block
-        )
+        block.nag_scale = nag_scale
+        block.nag_tau = nag_tau
+        block.nag_alpha = nag_alpha
+        block.forward = MethodType(NAGSingleStreamBlock.forward, block)
 
 
 def set_origin_flux(model: NAGFlux):

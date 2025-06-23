@@ -3,15 +3,25 @@ from comfy.ldm.modules.attention import CrossAttention, default, optimized_atten
 
 
 class NAGCrossAttention(CrossAttention):
+    def __init__(
+            self,
+            *args,
+            nag_scale: float = 1,
+            nag_tau: float = 2.5,
+            nag_alpha: float = 0.25,
+            **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.nag_scale = nag_scale
+        self.nag_tau = nag_tau
+        self.nag_alpha = nag_alpha
+    
     def forward(
             self,
             x,
             context=None,
             value=None,
             mask=None,
-            nag_scale: float = 1.0,
-            nag_tau: float = 2.5,
-            nag_alpha: float = 0.5,
     ):
         origin_bsz = len(context) - len(x)
         assert origin_bsz != 0
@@ -34,14 +44,14 @@ class NAGCrossAttention(CrossAttention):
 
         # NAG
         out_negative, out_positive = out[-origin_bsz:], out[-origin_bsz * 2:-origin_bsz]
-        out_guidance = out_positive * nag_scale - out_negative * (nag_scale - 1)
+        out_guidance = out_positive * self.nag_scale - out_negative * (self.nag_scale - 1)
         norm_positive = torch.norm(out_positive, p=1, dim=-1, keepdim=True).expand(*out_positive.shape)
         norm_guidance = torch.norm(out_guidance, p=1, dim=-1, keepdim=True).expand(*out_guidance.shape)
 
         scale = norm_guidance / norm_positive
-        out_guidance = out_guidance * torch.minimum(scale, scale.new_ones(1) * nag_tau) / scale
+        out_guidance = out_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
 
-        out_guidance = out_guidance * nag_alpha + out_positive * (1 - nag_alpha)
+        out_guidance = out_guidance * self.nag_alpha + out_positive * (1 - self.nag_alpha)
         out = torch.cat([out[:-origin_bsz * 2], out_guidance], dim=0)
 
         return self.to_out(out)

@@ -6,6 +6,19 @@ from comfy.ldm.flux.layers import DoubleStreamBlock, SingleStreamBlock, apply_mo
 
 
 class NAGDoubleStreamBlock(DoubleStreamBlock):
+    def __init__(
+            self,
+            *args,
+            nag_scale: float = 1,
+            nag_tau: float = 2.5,
+            nag_alpha: float = 0.25,
+            **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.nag_scale = nag_scale
+        self.nag_tau = nag_tau
+        self.nag_alpha = nag_alpha
+
     def forward(
             self,
             img: Tensor,
@@ -15,9 +28,6 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             attn_mask=None,
             modulation_dims_img=None,
             modulation_dims_txt=None,
-            nag_scale: float = 1.0,
-            nag_tau: float = 2.5,
-            nag_alpha: float = 0.25,
     ):
         origin_bsz = len(txt) - len(img)
         assert origin_bsz != 0
@@ -89,14 +99,14 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
         # NAG
         img_attn_positive = img_attn[-origin_bsz:]
 
-        img_attn_guidance = img_attn_positive * nag_scale - img_attn_negative * (nag_scale - 1)
+        img_attn_guidance = img_attn_positive * self.nag_scale - img_attn_negative * (self.nag_scale - 1)
         norm_positive = torch.norm(img_attn_positive, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
         norm_guidance = torch.norm(img_attn_guidance, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
 
         scale = norm_guidance / norm_positive
-        img_attn_guidance = img_attn_guidance * torch.minimum(scale, scale.new_ones(1) * nag_tau) / scale
+        img_attn_guidance = img_attn_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
 
-        img_attn_guidance = img_attn_guidance * nag_alpha + img_attn_positive * (1 - nag_alpha)
+        img_attn_guidance = img_attn_guidance * self.nag_alpha + img_attn_positive * (1 - self.nag_alpha)
 
         img_attn = torch.cat([img_attn[:-origin_bsz], img_attn_guidance], dim=0)
 
@@ -119,6 +129,21 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
 
 
 class NAGSingleStreamBlock(SingleStreamBlock):
+    def __init__(
+            self,
+            *args,
+            nag_scale: float = 1,
+            nag_tau: float = 2.5,
+            nag_alpha: float = 0.25,
+            txt_length:int = None,
+            origin_bsz: int = None,
+            **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.nag_scale = nag_scale
+        self.nag_tau = nag_tau
+        self.nag_alpha = nag_alpha
+
     def forward(
             self,
             x: Tensor,
@@ -127,9 +152,6 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             attn_mask=None,
             modulation_dims=None,
 
-            nag_scale: float = 1.0,
-            nag_tau: float = 2.5,
-            nag_alpha: float = 0.25,
             txt_length:int = None,
             origin_bsz: int = None,
     ) -> Tensor:
@@ -153,14 +175,14 @@ class NAGSingleStreamBlock(SingleStreamBlock):
 
         img_attn_positive = img_attn[-origin_bsz:]
 
-        img_attn_guidance = img_attn_positive * nag_scale - img_attn_negative * (nag_scale - 1)
+        img_attn_guidance = img_attn_positive * self.nag_scale - img_attn_negative * (self.nag_scale - 1)
         norm_positive = torch.norm(img_attn_positive, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
         norm_guidance = torch.norm(img_attn_guidance, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
 
         scale = norm_guidance / norm_positive
-        img_attn_guidance = img_attn_guidance * torch.minimum(scale, scale.new_ones(1) * nag_tau) / scale
+        img_attn_guidance = img_attn_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
 
-        img_attn_guidance = img_attn_guidance * nag_alpha + img_attn_positive * (1 - nag_alpha)
+        img_attn_guidance = img_attn_guidance * self.nag_alpha + img_attn_positive * (1 - self.nag_alpha)
 
         attn_negative[:, txt_length:] = img_attn_guidance
         attn[-origin_bsz:, txt_length:] = img_attn_guidance
