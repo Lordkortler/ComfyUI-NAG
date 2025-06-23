@@ -135,8 +135,6 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             nag_scale: float = 1,
             nag_tau: float = 2.5,
             nag_alpha: float = 0.25,
-            txt_length:int = None,
-            origin_bsz: int = None,
             **kwargs,
     ):
         super().__init__(*args, **kwargs)
