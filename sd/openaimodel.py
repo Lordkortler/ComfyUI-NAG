@@ -24,7 +24,7 @@ class NAGUnetModel(UNetModel):
             **kwargs,
     ):
         assert nag_negative_context is not None
-        context = torch.cat((context, nag_negative_context.to(context)), dim=0)
+        context = torch.cat((context, nag_negative_context[:, :context.shape[1]].to(context)), dim=0)
 
         return comfy.patcher_extension.WrapperExecutor.new_class_executor(
             self._forward,

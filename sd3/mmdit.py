@@ -160,7 +160,7 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             **kwargs,
     ) -> torch.Tensor:
         assert nag_negative_context is not None and nag_negative_y is not None
-        context = torch.cat((context, nag_negative_context.to(context)), dim=0)
+        context = torch.cat((context, nag_negative_context[:, :context.shape[1]].to(context)), dim=0)
         y = torch.cat((y, nag_negative_y.to(y)), dim=0)
 
         if self.context_processor is not None:

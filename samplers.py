@@ -1,5 +1,8 @@
 from __future__ import annotations
+
+import copy
 from typing import TYPE_CHECKING
+import math
 
 if TYPE_CHECKING:
     from comfy.model_patcher import ModelPatcher
@@ -64,13 +67,23 @@ class NAGCFGGuider(CFGGuider):
         if sigmas.shape[-1] == 0:
             return latent_image
 
+        self.conds = {}
+        for k in self.original_conds:
+            self.conds[k] = list(map(lambda a: a.copy(), self.original_conds[k]))
+        preprocess_conds_hooks(self.conds)
+
         apply_guidance = self.nag_scale > 1.
 
         self.nag_negative_cond = None
         if apply_guidance:
-            self.nag_negative_cond = self.origin_nag_negative_cond.copy()
+            self.nag_negative_cond = copy.deepcopy(self.origin_nag_negative_cond)
 
-        if apply_guidance:
+            crossattn_max_len = 1
+            for cond in self.conds.values():
+                crossattn_max_len = math.lcm(crossattn_max_len, cond[0]["cross_attn"].shape[1])
+            crossattn_len_times = math.ceil(crossattn_max_len / self.nag_negative_cond[0][0].shape[1])
+            self.nag_negative_cond[0][0] = self.nag_negative_cond[0][0].repeat(1, crossattn_len_times, 1)
+
             model = self.model_patcher.model.diffusion_model
             model_type = type(model)
             if model_type == Flux:
@@ -87,11 +100,6 @@ class NAGCFGGuider(CFGGuider):
                     f"Model type {model_type} is not support for NAGCFGGuider"
                 )
             set_fn(model, self.nag_negative_cond, self.nag_scale, self.nag_tau, self.nag_alpha)
-
-        self.conds = {}
-        for k in self.original_conds:
-            self.conds[k] = list(map(lambda a: a.copy(), self.original_conds[k]))
-        preprocess_conds_hooks(self.conds)
 
         try:
             orig_model_options = self.model_options
