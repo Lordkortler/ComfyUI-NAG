@@ -14,6 +14,7 @@ from comfy.ldm.flux.layers import (
 from comfy.ldm.flux.model import Flux
 
 from .layers import NAGDoubleStreamBlock, NAGSingleStreamBlock
+from ..utils import cat_context
 
 
 class NAGFlux(Flux):
@@ -143,12 +144,26 @@ class NAGFlux(Flux):
 
             **kwargs):
         assert nag_negative_context is not None and nag_negative_y is not None
-        context = torch.cat((context, nag_negative_context[:, :context.shape[1]].to(context)), dim=0)
+        context = cat_context(context, nag_negative_context)
         y = torch.cat((y, nag_negative_y.to(y)), dim=0)
+        nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
+        for block in self.double_blocks:
+            block.forward = MethodType(
+                partial(
+                    NAGDoubleStreamBlock.forward,
+                    nag_pad_len=nag_pad_len,
+                ),
+                block,
+            )
         for block in self.single_blocks:
             block.forward = MethodType(
-                partial(NAGSingleStreamBlock.forward, txt_length=context.shape[1], origin_bsz=nag_negative_context.shape[0]),
+                partial(
+                    NAGSingleStreamBlock.forward,
+                    txt_length=context.shape[1],
+                    origin_bsz=nag_negative_context.shape[0],
+                    nag_pad_len=nag_pad_len,
+                ),
                 block,
             )
 

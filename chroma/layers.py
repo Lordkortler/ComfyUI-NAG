@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from comfy.ldm.flux.math import attention
-from comfy.ldm.flux.layers import DoubleStreamBlock, SingleStreamBlock, apply_mod
+from comfy.ldm.chroma.layers import DoubleStreamBlock, SingleStreamBlock
 
 
 class NAGDoubleStreamBlock(DoubleStreamBlock):
@@ -23,30 +23,25 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             self,
             img: Tensor,
             txt: Tensor,
-            vec: Tensor,
             pe: Tensor,
+            vec: Tensor,
             attn_mask=None,
-            modulation_dims_img=None,
-            modulation_dims_txt=None,
             nag_pad_len: int = None,
     ):
         origin_bsz = len(txt) - len(img)
         assert origin_bsz != 0
 
-        img_mod1, img_mod2 = self.img_mod(vec[:-origin_bsz])
-        txt_mod1, txt_mod2 = self.txt_mod(vec)
+        (img_mod1, img_mod2), (txt_mod1, txt_mod2) = vec
 
         # prepare image for attention
-        img_modulated = self.img_norm1(img)
-        img_modulated = apply_mod(img_modulated, (1 + img_mod1.scale), img_mod1.shift, modulation_dims_img)
+        img_modulated = torch.addcmul(img_mod1.shift[:-origin_bsz], 1 + img_mod1.scale[:-origin_bsz], self.img_norm1(img))
         img_qkv = self.img_attn.qkv(img_modulated)
         img_q, img_k, img_v = img_qkv.view(img_qkv.shape[0], img_qkv.shape[1], 3, self.num_heads, -1).permute(2, 0, 3,
                                                                                                               1, 4)
         img_q, img_k = self.img_attn.norm(img_q, img_k, img_v)
 
         # prepare txt for attention
-        txt_modulated = self.txt_norm1(txt)
-        txt_modulated = apply_mod(txt_modulated, (1 + txt_mod1.scale), txt_mod1.shift, modulation_dims_txt)
+        txt_modulated = torch.addcmul(txt_mod1.shift, 1 + txt_mod1.scale, self.txt_norm1(txt))
         txt_qkv = self.txt_attn.qkv(txt_modulated)
         txt_q, txt_k, txt_v = txt_qkv.view(txt_qkv.shape[0], txt_qkv.shape[1], 3, self.num_heads, -1).permute(2, 0, 3,
                                                                                                               1, 4)
@@ -62,40 +57,22 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
 
         pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
 
-        if self.flipped_img_txt:
-            # run actual attention
-            attn_negative = attention(
-                torch.cat((img_q_negative, txt_q_negative), dim=2),
-                torch.cat((img_k_negative, txt_k_negative), dim=2),
-                torch.cat((img_v_negative, txt_v_negative), dim=2),
-                pe=pe_negative, mask=attn_mask,
-            )
-            attn = attention(
-                torch.cat((img_q, txt_q), dim=2),
-                torch.cat((img_k, txt_k), dim=2),
-                torch.cat((img_v, txt_v), dim=2),
-                pe=pe, mask=attn_mask,
-            )
+        # run actual attention
+        attn_negative = attention(
+            torch.cat((txt_q_negative, img_q_negative), dim=2),
+            torch.cat((txt_k_negative, img_k_negative), dim=2),
+            torch.cat((txt_v_negative, img_v_negative), dim=2),
+            pe=pe_negative, mask=attn_mask,
+        )
+        attn = attention(
+            torch.cat((txt_q, img_q), dim=2),
+            torch.cat((txt_k, img_k), dim=2),
+            torch.cat((txt_v, img_v), dim=2),
+            pe=pe, mask=attn_mask,
+        )
 
-            img_attn_negative, txt_attn_negative = attn_negative[:, : img.shape[1]], attn_negative[:, img.shape[1]:]
-            img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1]:]
-        else:
-            # run actual attention
-            attn_negative = attention(
-                torch.cat((txt_q_negative, img_q_negative), dim=2),
-                torch.cat((txt_k_negative, img_k_negative), dim=2),
-                torch.cat((txt_v_negative, img_v_negative), dim=2),
-                pe=pe_negative, mask=attn_mask,
-            )
-            attn = attention(
-                torch.cat((txt_q, img_q), dim=2),
-                torch.cat((txt_k, img_k), dim=2),
-                torch.cat((txt_v, img_v), dim=2),
-                pe=pe, mask=attn_mask,
-            )
-
-            txt_attn_negative, img_attn_negative = attn_negative[:, : txt.shape[1] - nag_pad_len], attn_negative[:, txt.shape[1] - nag_pad_len:]
-            txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1]:]
+        txt_attn_negative, img_attn_negative = attn_negative[:, : txt.shape[1] - nag_pad_len], attn_negative[:, txt.shape[1] - nag_pad_len:]
+        txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1]:]
 
         # NAG
         img_attn_positive = img_attn[-origin_bsz:]
@@ -112,17 +89,15 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
         img_attn = torch.cat([img_attn[:-origin_bsz], img_attn_guidance], dim=0)
 
         # calculate the img bloks
-        img = img + apply_mod(self.img_attn.proj(img_attn), img_mod1.gate, None, modulation_dims_img)
-        img = img + apply_mod(
-            self.img_mlp(apply_mod(self.img_norm2(img), (1 + img_mod2.scale), img_mod2.shift, modulation_dims_img)),
-            img_mod2.gate, None, modulation_dims_img)
+        img.addcmul_(img_mod1.gate[:-origin_bsz], self.img_attn.proj(img_attn))
+        img.addcmul_(img_mod2.gate[:-origin_bsz],
+                     self.img_mlp(torch.addcmul(img_mod2.shift[:-origin_bsz], 1 + img_mod2.scale[:-origin_bsz], self.img_norm2(img))))
 
         # calculate the txt bloks
-        txt[:-origin_bsz] += apply_mod(self.txt_attn.proj(txt_attn), txt_mod1.gate[:-origin_bsz], None, modulation_dims_txt)
-        txt[-origin_bsz:, nag_pad_len:] += apply_mod(self.txt_attn.proj(txt_attn_negative), txt_mod1.gate[-origin_bsz:], None, modulation_dims_txt)
-        txt += apply_mod(
-            self.txt_mlp(apply_mod(self.txt_norm2(txt), (1 + txt_mod2.scale), txt_mod2.shift, modulation_dims_txt)),
-            txt_mod2.gate, None, modulation_dims_txt)
+        txt[:-origin_bsz].addcmul_(txt_mod1.gate[:-origin_bsz], self.txt_attn.proj(txt_attn))
+        txt[-origin_bsz:, nag_pad_len:].addcmul_(txt_mod1.gate[-origin_bsz:], self.txt_attn.proj(txt_attn_negative))
+        txt.addcmul_(txt_mod2.gate,
+                     self.txt_mlp(torch.addcmul(txt_mod2.shift, 1 + txt_mod2.scale, self.txt_norm2(txt))))
 
         if txt.dtype == torch.float16:
             txt = torch.nan_to_num(txt, nan=0.0, posinf=65504, neginf=-65504)
@@ -147,17 +122,16 @@ class NAGSingleStreamBlock(SingleStreamBlock):
     def forward(
             self,
             x: Tensor,
-            vec: Tensor,
             pe: Tensor,
+            vec: Tensor,
             attn_mask=None,
-            modulation_dims=None,
-
             txt_length:int = None,
             origin_bsz: int = None,
             nag_pad_len: int = None,
     ) -> Tensor:
-        mod= self.modulation(vec)[0]
-        qkv, mlp = torch.split(self.linear1(apply_mod(self.pre_norm(x), (1 + mod.scale), mod.shift, modulation_dims)), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
+        mod = vec
+        x_mod = torch.addcmul(mod.shift, 1 + mod.scale, self.pre_norm(x))
+        qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
         q, k, v = qkv.view(qkv.shape[0], qkv.shape[1], 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         q, k = self.norm(q, k, v)
@@ -169,7 +143,6 @@ class NAGSingleStreamBlock(SingleStreamBlock):
 
         pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
 
-        # compute attention
         attn_negative = attention(q_negative, k_negative, v_negative, pe=pe_negative, mask=attn_mask)
         attn = attention(q, k, v, pe=pe, mask=attn_mask)
 
@@ -194,8 +167,9 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         output_negative = self.linear2(torch.cat((attn_negative, self.mlp_act(mlp[-origin_bsz:, nag_pad_len:])), 2))
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp[:-origin_bsz])), 2))
 
-        x[:-origin_bsz] += apply_mod(output, mod.gate[:-origin_bsz], None, modulation_dims)
-        x[-origin_bsz:, nag_pad_len:] += apply_mod(output_negative, mod.gate[-origin_bsz:], None, modulation_dims)
+        x[:-origin_bsz].addcmul_(mod.gate[:-origin_bsz], output)
+        x[-origin_bsz:, nag_pad_len:].addcmul_(mod.gate[-origin_bsz:], output_negative)
+
         if x.dtype == torch.float16:
             x = torch.nan_to_num(x, nan=0.0, posinf=65504, neginf=-65504)
         return x

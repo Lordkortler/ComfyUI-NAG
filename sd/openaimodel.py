@@ -7,6 +7,7 @@ from comfy.ldm.modules.attention import CrossAttention
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
 
 from .attention import NAGCrossAttention
+from ..utils import cat_context
 
 
 class NAGUnetModel(UNetModel):
@@ -24,7 +25,7 @@ class NAGUnetModel(UNetModel):
             **kwargs,
     ):
         assert nag_negative_context is not None
-        context = torch.cat((context, nag_negative_context[:, :context.shape[1]].to(context)), dim=0)
+        context = cat_context(context, nag_negative_context)
 
         return comfy.patcher_extension.WrapperExecutor.new_class_executor(
             self._forward,

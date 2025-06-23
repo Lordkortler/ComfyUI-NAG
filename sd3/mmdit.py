@@ -12,6 +12,8 @@ from comfy.ldm.modules.diffusionmodules.mmdit import (
     default,
 )
 
+from ..utils import cat_context
+
 
 def _nag_block_mixing(
         context,
@@ -160,7 +162,7 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             **kwargs,
     ) -> torch.Tensor:
         assert nag_negative_context is not None and nag_negative_y is not None
-        context = torch.cat((context, nag_negative_context[:, :context.shape[1]].to(context)), dim=0)
+        context = cat_context(context, nag_negative_context)
         y = torch.cat((y, nag_negative_y.to(y)), dim=0)
 
         if self.context_processor is not None:
