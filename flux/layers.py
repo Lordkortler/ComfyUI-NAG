@@ -41,29 +41,53 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
                                                                                                               1, 4)
         txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
 
-        img_q = torch.cat((img_q, img_q[-origin_bsz:]), dim=0)
-        img_k = torch.cat((img_k, img_k[-origin_bsz:]), dim=0)
-        img_v = torch.cat((img_v, img_v[-origin_bsz:]), dim=0)
+        txt_q_negative, txt_q = txt_q[-origin_bsz:], txt_q[:-origin_bsz]
+        txt_k_negative, txt_k = txt_k[-origin_bsz:], txt_k[:-origin_bsz]
+        txt_v_negative, txt_v = txt_v[-origin_bsz:], txt_v[:-origin_bsz]
+
+        img_q_negative = img_q[-origin_bsz:]
+        img_k_negative = img_k[-origin_bsz:]
+        img_v_negative = img_v[-origin_bsz:]
 
         if self.flipped_img_txt:
             # run actual attention
-            attn = attention(torch.cat((img_q, txt_q), dim=2),
-                             torch.cat((img_k, txt_k), dim=2),
-                             torch.cat((img_v, txt_v), dim=2),
-                             pe=pe, mask=attn_mask)
+            attn_negative = attention(
+                torch.cat((img_q_negative, txt_q_negative), dim=2),
+                torch.cat((img_k_negative, txt_k_negative), dim=2),
+                torch.cat((img_v_negative, txt_v_negative), dim=2),
+                pe=pe, mask=attn_mask,
+            )
+            attn = attention(
+                torch.cat((img_q, txt_q), dim=2),
+                torch.cat((img_k, txt_k), dim=2),
+                torch.cat((img_v, txt_v), dim=2),
+                pe=pe, mask=attn_mask,
+            )
 
+            img_attn_negative, txt_attn_negative = attn_negative[:, : img.shape[1]], attn_negative[:, img.shape[1]:]
             img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1]:]
         else:
             # run actual attention
-            attn = attention(torch.cat((txt_q, img_q), dim=2),
-                             torch.cat((txt_k, img_k), dim=2),
-                             torch.cat((txt_v, img_v), dim=2),
-                             pe=pe, mask=attn_mask)
+            attn_negative = attention(
+                torch.cat((txt_q_negative, img_q_negative), dim=2),
+                torch.cat((txt_k_negative, img_k_negative), dim=2),
+                torch.cat((txt_v_negative, img_v_negative), dim=2),
+                pe=pe, mask=attn_mask,
+            )
+            attn = attention(
+                torch.cat((txt_q, img_q), dim=2),
+                torch.cat((txt_k, img_k), dim=2),
+                torch.cat((txt_v, img_v), dim=2),
+                pe=pe, mask=attn_mask,
+            )
 
+            txt_attn_negative, img_attn_negative = attn_negative[:, : txt.shape[1]], attn_negative[:, txt.shape[1]:]
             txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1]:]
 
+        txt_attn = torch.cat([txt_attn, txt_attn_negative], dim=0)
+
         # NAG
-        img_attn_negative, img_attn_positive = img_attn[-origin_bsz:], img_attn[-origin_bsz * 2:-origin_bsz]
+        img_attn_positive = img_attn[-origin_bsz:]
 
         img_attn_guidance = img_attn_positive * nag_scale - img_attn_negative * (nag_scale - 1)
         norm_positive = torch.norm(img_attn_positive, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
@@ -74,7 +98,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
 
         img_attn_guidance = img_attn_guidance * nag_alpha + img_attn_positive * (1 - nag_alpha)
 
-        img_attn = torch.cat([img_attn[:-origin_bsz * 2], img_attn_guidance], dim=0)
+        img_attn = torch.cat([img_attn[:-origin_bsz], img_attn_guidance], dim=0)
 
         # calculate the img bloks
         img = img + apply_mod(self.img_attn.proj(img_attn), img_mod1.gate, None, modulation_dims_img)
