@@ -78,10 +78,17 @@ class NAGCFGGuider(CFGGuider):
         if apply_guidance:
             self.nag_negative_cond = copy.deepcopy(self.origin_nag_negative_cond)
 
+            nag_crossattn_len = self.nag_negative_cond[0][0].shape[1]
             crossattn_max_len = 1
             for cond in self.conds.values():
-                crossattn_max_len = math.lcm(crossattn_max_len, cond[0]["cross_attn"].shape[1])
-            crossattn_len_times = math.ceil(crossattn_max_len / self.nag_negative_cond[0][0].shape[1])
+                cond_crossattn_len = cond[0]["cross_attn"].shape[1]
+                if cond_crossattn_len < nag_crossattn_len:
+                    cond[0]["cross_attn"] = \
+                        cond[0]["cross_attn"].repeat(1, math.ceil(nag_crossattn_len / cond_crossattn_len), 1)
+                    cond_crossattn_len = cond[0]["cross_attn"].shape[1]
+                crossattn_max_len = math.lcm(crossattn_max_len, cond_crossattn_len)
+            crossattn_max_len = min(crossattn_max_len, 1024)
+            crossattn_len_times = math.ceil(crossattn_max_len / nag_crossattn_len)
             self.nag_negative_cond[0][0] = self.nag_negative_cond[0][0].repeat(1, crossattn_len_times, 1)
 
             model = self.model_patcher.model.diffusion_model
