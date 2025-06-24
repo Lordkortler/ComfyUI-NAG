@@ -98,6 +98,19 @@ class NAGJointBlock(JointBlock):
 
 
 class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
+    def __init__(
+            self,
+            *args,
+            nag_scale: float = 1,
+            nag_tau: float = 2.5,
+            nag_alpha: float = 0.25,
+            **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.nag_scale = nag_scale
+        self.nag_tau = nag_tau
+        self.nag_alpha = nag_alpha
+
     def forward_core_with_concat(
         self,
         x: torch.Tensor,
@@ -156,14 +169,32 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             control=None,
             transformer_options={},
 
+            positive_context=None,
             nag_negative_context=None,
             nag_negative_y=None,
 
             **kwargs,
     ) -> torch.Tensor:
-        assert nag_negative_context is not None and nag_negative_y is not None
-        context = cat_context(context, nag_negative_context)
-        y = torch.cat((y, nag_negative_y.to(y)), dim=0)
+        if context.shape[0] != nag_negative_context.shape[0] \
+                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+            context = cat_context(context, nag_negative_context)
+            y = torch.cat((y, nag_negative_y.to(y)), dim=0)
+
+            self.forward_core_with_concat = MethodType(NAGOpenAISignatureMMDITWrapper.forward_core_with_concat, self)
+            for block in self.joint_blocks:
+                block.forward = MethodType(
+                    partial(
+                        NAGJointBlock.forward,
+                        nag_scale=self.nag_scale,
+                        nag_tau=self.nag_tau,
+                        nag_alpha=self.nag_alpha,
+                    ),
+                    block,
+                )
+        else:
+            self.forward_core_with_concat = MethodType(OpenAISignatureMMDITWrapper.forward_core_with_concat, self)
+            for block in self.joint_blocks:
+                block.forward = MethodType(JointBlock.forward, block)
 
         if self.context_processor is not None:
             context = self.context_processor(context)
@@ -188,26 +219,23 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
         return x[:, :, :hw[-2], :hw[-1]]
 
 
-def set_nag_sd3(model: OpenAISignatureMMDITWrapper, nag_negative_cond, nag_scale, nag_tau, nag_alpha):
+def set_nag_sd3(
+        model: OpenAISignatureMMDITWrapper,
+        positive_context,
+        nag_negative_cond,
+        nag_scale, nag_tau, nag_alpha):
+    model.nag_scale = nag_scale
+    model.nag_tau = nag_tau
+    model.nag_alpha = nag_alpha
     model.forward = MethodType(
         partial(
             NAGOpenAISignatureMMDITWrapper.forward,
+            positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
         ),
         model
     )
-    model.forward_core_with_concat = MethodType(NAGOpenAISignatureMMDITWrapper.forward_core_with_concat, model)
-    for block in model.joint_blocks:
-        block.forward = MethodType(
-            partial(
-                NAGJointBlock.forward,
-                nag_scale=nag_scale,
-                nag_tau=nag_tau,
-                nag_alpha=nag_alpha,
-            ),
-            block
-        )
 
 
 def set_origin_sd3(model: NAGOpenAISignatureMMDITWrapper):

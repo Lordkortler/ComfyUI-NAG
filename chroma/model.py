@@ -147,36 +147,45 @@ class NAGChroma(Chroma):
             control=None,
             transformer_options={},
 
+            positive_context=None,
             nag_negative_context=None,
 
             **kwargs,
     ):
-        assert nag_negative_context is not None
-        origin_context_len = context.shape[1]
-        context = cat_context(context, nag_negative_context, trim_context=True)
-        context_pad_len = context.shape[1] - origin_context_len
-        nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
+        if context.shape[0] != nag_negative_context.shape[0] \
+                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+            origin_context_len = context.shape[1]
+            context = cat_context(context, nag_negative_context, trim_context=True)
+            context_pad_len = context.shape[1] - origin_context_len
+            nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
-        for block in self.double_blocks:
-            block.forward = MethodType(
-                partial(
-                    NAGDoubleStreamBlock.forward,
-                    context_pad_len=context_pad_len,
-                    nag_pad_len=nag_pad_len,
-                ),
-                block,
-            )
-        for block in self.single_blocks:
-            block.forward = MethodType(
-                partial(
-                    NAGSingleStreamBlock.forward,
-                    txt_length=context.shape[1],
-                    origin_bsz=nag_negative_context.shape[0],
-                    context_pad_len=context_pad_len,
-                    nag_pad_len=nag_pad_len,
-                ),
-                block,
-            )
+            self.forward_orig = MethodType(NAGChroma.forward_orig, self)
+            for block in self.double_blocks:
+                block.forward = MethodType(
+                    partial(
+                        NAGDoubleStreamBlock.forward,
+                        context_pad_len=context_pad_len,
+                        nag_pad_len=nag_pad_len,
+                    ),
+                    block,
+                )
+            for block in self.single_blocks:
+                block.forward = MethodType(
+                    partial(
+                        NAGSingleStreamBlock.forward,
+                        txt_length=context.shape[1],
+                        origin_bsz=nag_negative_context.shape[0],
+                        context_pad_len=context_pad_len,
+                        nag_pad_len=nag_pad_len,
+                    ),
+                    block,
+                )
+        else:
+            self.forward_orig = MethodType(Chroma.forward_orig, self)
+            for block in self.double_blocks:
+                block.forward = MethodType(DoubleStreamBlock.forward, block)
+            for block in self.single_blocks:
+                block.forward = MethodType(SingleStreamBlock.forward, block)
 
         bs, c, h, w = x.shape
         patch_size = 2
@@ -196,11 +205,17 @@ class NAGChroma(Chroma):
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
 
 
-def set_nag_chroma(model: Chroma, nag_negative_cond, nag_scale, nag_tau, nag_alpha):
+def set_nag_chroma(
+        model: Chroma,
+        positive_context,
+        nag_negative_cond,
+        nag_scale, nag_tau, nag_alpha,
+):
     model.forward_orig = MethodType(NAGChroma.forward_orig, model)
     model.forward = MethodType(
         partial(
             NAGChroma.forward,
+            positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
         ),
@@ -210,12 +225,10 @@ def set_nag_chroma(model: Chroma, nag_negative_cond, nag_scale, nag_tau, nag_alp
         block.nag_scale = nag_scale
         block.nag_tau = nag_tau
         block.nag_alpha = nag_alpha
-        block.forward = MethodType(NAGDoubleStreamBlock.forward, block)
     for block in model.single_blocks:
         block.nag_scale = nag_scale
         block.nag_tau = nag_tau
         block.nag_alpha = nag_alpha
-        block.forward = MethodType(NAGSingleStreamBlock.forward, block)
 
 
 def set_origin_chroma(model: NAGChroma):

@@ -20,12 +20,21 @@ class NAGUnetModel(UNetModel):
             control=None,
             transformer_options={},
 
+            positive_context=None,
             nag_negative_context=None,
 
             **kwargs,
     ):
-        assert nag_negative_context is not None
-        context = cat_context(context, nag_negative_context)
+        if context.shape[0] != nag_negative_context.shape[0] \
+                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+            context = cat_context(context, nag_negative_context)
+            for name, module in self.named_modules():
+                if "attn2" in name and isinstance(module, CrossAttention):
+                    module.forward = MethodType(NAGCrossAttention.forward, module)
+        else:
+            for name, module in self.named_modules():
+                if "attn2" in name and isinstance(module, CrossAttention):
+                    module.forward = MethodType(CrossAttention.forward, module)
 
         return comfy.patcher_extension.WrapperExecutor.new_class_executor(
             self._forward,
@@ -35,10 +44,15 @@ class NAGUnetModel(UNetModel):
         ).execute(x, timesteps, context, y, control, transformer_options, **kwargs)
 
 
-def set_nag_sd(model: UNetModel, nag_negative_cond, nag_scale, nag_tau, nag_alpha):
+def set_nag_sd(
+        model: UNetModel,
+        positive_context,
+        nag_negative_cond,
+        nag_scale, nag_tau, nag_alpha):
     model.forward = MethodType(
         partial(
             NAGUnetModel.forward,
+            positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
         ),
         model
@@ -48,7 +62,6 @@ def set_nag_sd(model: UNetModel, nag_negative_cond, nag_scale, nag_tau, nag_alph
             module.nag_scale = nag_scale
             module.nag_tau = nag_tau
             module.nag_alpha = nag_alpha
-            module.forward = MethodType(NAGCrossAttention.forward, module)
 
 
 def set_origin_sd(model: NAGUnetModel):

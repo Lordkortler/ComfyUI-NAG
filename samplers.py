@@ -98,7 +98,12 @@ class NAGCFGGuider(CFGGuider):
                 raise ValueError(
                     f"Model type {model_type} is not support for NAGCFGGuider"
                 )
-            set_fn(model, self.nag_negative_cond, self.nag_scale, self.nag_tau, self.nag_alpha)
+            positive_context = self.conds["positive"][0]["cross_attn"] if "negative" in self.conds else None
+            set_fn(
+                model,
+                positive_context,
+                self.nag_negative_cond, self.nag_scale, self.nag_tau, self.nag_alpha,
+            )
 
         try:
             orig_model_options = self.model_options
