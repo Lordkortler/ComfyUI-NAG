@@ -16,7 +16,7 @@ Wan2.1 Demo: https://huggingface.co/spaces/ChenDY/NAG_wan2-1-fast
 
 To use NAG, simply replace the `CFGGuider` node in your workflow with `NAGCFGGuider`.
 
-We currently support `Flux`, `SD3.5` and `SDXL`.
+We currently support `Flux`, `Choroma`, `SD3.5` and `SDXL`.
 
 Example workflows are available in the `./workflows` directory!
 
