@@ -14,6 +14,8 @@ from comfy.samplers import (
     filter_registered_hooks_on_conds,
     get_total_hook_groups_in_conds,
     CFGGuider,
+    sampler_object,
+    KSampler,
 )
 import comfy.sampler_helpers
 import comfy.model_patcher
@@ -28,6 +30,26 @@ from .flux.model import set_nag_flux, set_origin_flux
 from .chroma.model import set_nag_chroma, set_origin_chroma
 from .sd.openaimodel import set_nag_sd, set_origin_sd
 from .sd3.mmdit import set_nag_sd3, set_origin_sd3
+
+
+def sample_with_nag(
+        model,
+        noise,
+        positive, negative, nag_negative,
+        cfg,
+        nag_scale, nag_tau, nag_alpha,
+        device,
+        sampler,
+        sigmas,
+        model_options={},
+        latent_image=None, denoise_mask=None, callback=None, disable_pbar=False, seed=None,
+):
+    guider = NAGCFGGuider(model)
+    guider.set_conds(positive, negative)
+    guider.set_cfg(cfg)
+    guider.set_batch_size(latent_image.shape[0])
+    guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha)
+    return guider.sample(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed)
 
 
 class NAGCFGGuider(CFGGuider):
@@ -140,3 +162,49 @@ class NAGCFGGuider(CFGGuider):
         del self.conds
         del self.nag_negative_cond
         return output
+
+
+class KSamplerWithNAG(KSampler):
+    def sample(
+            self,
+            noise,
+            positive, negative, nag_negative,
+            cfg,
+            nag_scale, nag_tau, nag_alpha,
+            latent_image=None,
+            start_step=None, last_step=None, force_full_denoise=False,
+            denoise_mask=None,
+            sigmas=None, callback=None, disable_pbar=False, seed=None,
+    ):
+        if sigmas is None:
+            sigmas = self.sigmas
+
+        if last_step is not None and last_step < (len(sigmas) - 1):
+            sigmas = sigmas[:last_step + 1]
+            if force_full_denoise:
+                sigmas[-1] = 0
+
+        if start_step is not None:
+            if start_step < (len(sigmas) - 1):
+                sigmas = sigmas[start_step:]
+            else:
+                if latent_image is not None:
+                    return latent_image
+                else:
+                    return torch.zeros_like(noise)
+
+        sampler = sampler_object(self.sampler)
+
+        return sample_with_nag(
+            self.model,
+            noise,
+            positive, negative, nag_negative,
+            cfg,
+            nag_scale, nag_tau, nag_alpha,
+            self.device,
+            sampler,
+            sigmas,
+            self.model_options,
+            latent_image=latent_image, denoise_mask=denoise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed,
+        )
+
