@@ -8,9 +8,11 @@ Paper: https://arxiv.org/abs/2505.21179
 
 Code: https://github.com/ChenDarYen/Normalized-Attention-Guidance
 
-Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
-
 Wan2.1 Demo: https://huggingface.co/spaces/ChenDY/NAG_wan2-1-fast
+
+LTX Video Demo: https://huggingface.co/spaces/ChenDY/NAG_ltx-video-distilled
+
+Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## Usage
 
