@@ -16,7 +16,7 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## Usage
 
-To use NAG, simply replace the `CFGGuider` node in your workflow with `NAGCFGGuider`.
+To use NAG, simply replace the `CFGGuider` node with `NAGCFGGuider`, or the `KSampler` node with `KSamplerWithNAG` in your workflow.
 
 We currently support `Flux`, `Choroma`, `SD3.5` and `SDXL`.
 
