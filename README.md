@@ -14,6 +14,11 @@ LTX Video Demo: https://huggingface.co/spaces/ChenDY/NAG_ltx-video-distilled
 
 Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
+## Nodes
+
+- `NAGCFGGuider`
+- `KSamplerWithNAG`
+
 ## Usage
 
 To use NAG, simply replace the `CFGGuider` node with `NAGCFGGuider`, or the `KSampler` node with `KSamplerWithNAG` in your workflow.
