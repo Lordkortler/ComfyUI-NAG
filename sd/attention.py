@@ -1,5 +1,6 @@
 import torch
 from comfy.ldm.modules.attention import CrossAttention, default, optimized_attention, optimized_attention_masked
+from ..utils import nag
 
 
 class NAGCrossAttention(CrossAttention):
@@ -44,14 +45,7 @@ class NAGCrossAttention(CrossAttention):
 
         # NAG
         out_negative, out_positive = out[-origin_bsz:], out[-origin_bsz * 2:-origin_bsz]
-        out_guidance = out_positive * self.nag_scale - out_negative * (self.nag_scale - 1)
-        norm_positive = torch.norm(out_positive, p=1, dim=-1, keepdim=True).expand(*out_positive.shape)
-        norm_guidance = torch.norm(out_guidance, p=1, dim=-1, keepdim=True).expand(*out_guidance.shape)
-
-        scale = norm_guidance / norm_positive
-        out_guidance = out_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
-
-        out_guidance = out_guidance * self.nag_alpha + out_positive * (1 - self.nag_alpha)
+        out_guidance = nag(out_positive, out_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
         out = torch.cat([out[:-origin_bsz * 2], out_guidance], dim=0)
 
         return self.to_out(out)

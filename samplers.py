@@ -25,11 +25,13 @@ from comfy.ldm.flux.model import Flux
 from comfy.ldm.chroma.model import Chroma
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper
+from comfy.ldm.wan.model import WanModel
 
 from .flux.model import set_nag_flux, set_origin_flux
 from .chroma.model import set_nag_chroma, set_origin_chroma
 from .sd.openaimodel import set_nag_sd, set_origin_sd
 from .sd3.mmdit import set_nag_sd3, set_origin_sd3
+from .wan.model import set_nag_wan, set_origin_wan
 
 
 def sample_with_nag(
@@ -120,6 +122,9 @@ class NAGCFGGuider(CFGGuider):
             elif model_type == OpenAISignatureMMDITWrapper:
                 set_fn = set_nag_sd3
                 reset_fn = set_origin_sd3
+            elif model_type == WanModel:
+                set_fn = set_nag_wan
+                reset_fn = set_origin_wan
             else:
                 raise ValueError(
                     f"Model type {model_type} is not support for NAGCFGGuider"

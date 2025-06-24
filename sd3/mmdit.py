@@ -12,7 +12,7 @@ from comfy.ldm.modules.diffusionmodules.mmdit import (
     default,
 )
 
-from ..utils import cat_context
+from ..utils import nag, cat_context
 
 
 def _nag_block_mixing(
@@ -54,14 +54,7 @@ def _nag_block_mixing(
 
     # NAG
     x_attn_negative, x_attn_positive = x_attn[-origin_bsz:], x_attn[-origin_bsz * 2:-origin_bsz]
-    x_attn_guidance = x_attn_positive * nag_scale - x_attn_negative * (nag_scale - 1)
-    norm_positive = torch.norm(x_attn_positive, p=1, dim=-1, keepdim=True).expand(*x_attn_positive.shape)
-    norm_guidance = torch.norm(x_attn_guidance, p=1, dim=-1, keepdim=True).expand(*x_attn_guidance.shape)
-
-    scale = norm_guidance / (norm_positive + 1e-7)
-    x_attn_guidance = x_attn_guidance * torch.minimum(scale, scale.new_ones(1) * nag_tau) / (scale + 1e-7)
-
-    x_attn_guidance = x_attn_guidance * nag_alpha + x_attn_positive * (1 - nag_alpha)
+    x_attn_guidance = nag(x_attn_positive, x_attn_negative, nag_scale, nag_tau, nag_alpha)
 
     x_attn = torch.cat([x_attn[:-origin_bsz * 2], x_attn_guidance], dim=0)
 

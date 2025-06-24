@@ -4,6 +4,8 @@ from torch import Tensor
 from comfy.ldm.flux.math import attention
 from comfy.ldm.chroma.layers import DoubleStreamBlock, SingleStreamBlock
 
+from ..utils import nag
+
 
 class NAGDoubleStreamBlock(DoubleStreamBlock):
     def __init__(
@@ -78,15 +80,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
 
         # NAG
         img_attn_positive = img_attn[-origin_bsz:]
-
-        img_attn_guidance = img_attn_positive * self.nag_scale - img_attn_negative * (self.nag_scale - 1)
-        norm_positive = torch.norm(img_attn_positive, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
-        norm_guidance = torch.norm(img_attn_guidance, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
-
-        scale = norm_guidance / norm_positive
-        img_attn_guidance = img_attn_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
-
-        img_attn_guidance = img_attn_guidance * self.nag_alpha + img_attn_positive * (1 - self.nag_alpha)
+        img_attn_guidance = nag(img_attn_positive, img_attn_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
 
         img_attn = torch.cat([img_attn[:-origin_bsz], img_attn_guidance], dim=0)
 
@@ -156,15 +150,7 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         img_attn = attn[:, txt_length - context_pad_len:]
 
         img_attn_positive = img_attn[-origin_bsz:]
-
-        img_attn_guidance = img_attn_positive * self.nag_scale - img_attn_negative * (self.nag_scale - 1)
-        norm_positive = torch.norm(img_attn_positive, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
-        norm_guidance = torch.norm(img_attn_guidance, p=2, dim=-1, keepdim=True).expand(*img_attn_positive.shape)
-
-        scale = norm_guidance / norm_positive
-        img_attn_guidance = img_attn_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
-
-        img_attn_guidance = img_attn_guidance * self.nag_alpha + img_attn_positive * (1 - self.nag_alpha)
+        img_attn_guidance = nag(img_attn_positive, img_attn_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
 
         attn_negative[:, txt_length - nag_pad_len:] = img_attn_guidance
         attn[-origin_bsz:, txt_length - context_pad_len:] = img_attn_guidance

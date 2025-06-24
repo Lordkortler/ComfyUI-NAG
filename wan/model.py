@@ -14,7 +14,7 @@ from comfy.ldm.wan.model import (
     sinusoidal_embedding_1d,
 )
 
-from ..utils import cat_context
+from ..utils import nag, cat_context
 
 
 class NAGWanT2VCrossAttention(WanT2VCrossAttention):
@@ -61,14 +61,7 @@ class NAGWanT2VCrossAttention(WanT2VCrossAttention):
         x_negative = optimized_attention(q_negative, k_negative, v_negative, heads=self.num_heads)
 
         x_positive = x[-origin_bsz:]
-        x_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
-        norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True).expand(*x_positive.shape)
-        norm_guidance = torch.norm(x_guidance, p=1, dim=-1, keepdim=True).expand(*x_guidance.shape)
-
-        scale = norm_guidance / norm_positive
-        x_guidance = x_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
-
-        x_guidance = x_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
+        x_guidance = nag(x_positive, x_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
         x = torch.cat([x[:-origin_bsz], x_guidance], dim=0)
 
         x = self.o(x)
