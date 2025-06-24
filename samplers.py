@@ -37,6 +37,10 @@ class NAGCFGGuider(CFGGuider):
         self.nag_scale = 5.0
         self.nag_tau = 3.5
         self.nag_alpha = 0.25
+        self.batch_size = 1
+
+    def set_batch_size(self, batch_size):
+        self.batch_size = batch_size
 
     def set_nag(self, nag_negative_cond, nag_scale, nag_tau, nag_alpha):
         self.origin_nag_negative_cond = nag_negative_cond
@@ -99,10 +103,14 @@ class NAGCFGGuider(CFGGuider):
                     f"Model type {model_type} is not support for NAGCFGGuider"
                 )
             positive_context = self.conds["positive"][0]["cross_attn"] if "negative" in self.conds else None
+            self.nag_negative_cond[0][0] = self.nag_negative_cond[0][0].expand(self.batch_size, -1, -1)
+            if self.nag_negative_cond[0][1].get("pooled_output", None) is not None:
+                self.nag_negative_cond[0][1]["pooled_output"] = self.nag_negative_cond[0][1]["pooled_output"].expand(self.batch_size, -1)
             set_fn(
                 model,
-                positive_context,
-                self.nag_negative_cond, self.nag_scale, self.nag_tau, self.nag_alpha,
+                positive_context.expand(self.batch_size, -1, -1),
+                self.nag_negative_cond,
+                self.nag_scale, self.nag_tau, self.nag_alpha,
             )
 
         try:

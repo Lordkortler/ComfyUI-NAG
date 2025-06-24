@@ -14,6 +14,7 @@ class NAGCFGGuider:
                         "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                         "nag_tau": ("FLOAT", {"default": 2.5, "min": 1.0, "max": 10.0, "step":0.1, "round": 0.01}),
                         "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
+                        "latent_image": ("LATENT", ),
                      }
                 }
 
@@ -32,10 +33,13 @@ class NAGCFGGuider:
             nag_scale,
             nag_tau,
             nag_alpha,
+            latent_image,
     ):
+        batch_size = latent_image["samples"].shape[0]
         guider = samplers_NAGCFGGuider(model)
         guider.set_conds(positive, negative)
         guider.set_cfg(cfg)
+        guider.set_batch_size(batch_size)
         guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha)
         return (guider,)
 
