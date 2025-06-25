@@ -26,12 +26,14 @@ from comfy.ldm.chroma.model import Chroma
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper
 from comfy.ldm.wan.model import WanModel
+from comfy.ldm.hunyuan_video.model import HunyuanVideo
 
 from .flux.model import set_nag_flux, set_origin_flux
 from .chroma.model import set_nag_chroma, set_origin_chroma
 from .sd.openaimodel import set_nag_sd, set_origin_sd
 from .sd3.mmdit import set_nag_sd3, set_origin_sd3
 from .wan.model import set_nag_wan, set_origin_wan
+from .hunyuan_video.model import set_nag_hunyuan_video, set_origin_hunyuan_video
 
 
 def sample_with_nag(
@@ -125,6 +127,9 @@ class NAGCFGGuider(CFGGuider):
             elif model_type == WanModel:
                 set_fn = set_nag_wan
                 reset_fn = set_origin_wan
+            elif model_type == HunyuanVideo:
+                set_fn = set_nag_hunyuan_video
+                reset_fn = set_origin_hunyuan_video
             else:
                 raise ValueError(
                     f"Model type {model_type} is not support for NAGCFGGuider"
