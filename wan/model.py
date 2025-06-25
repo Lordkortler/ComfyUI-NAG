@@ -8,6 +8,7 @@ import comfy
 from comfy.ldm.modules.attention import optimized_attention
 from comfy.ldm.wan.model import (
     WanModel,
+    VaceWanModel,
     WanSelfAttention,
     WanT2VCrossAttention,
     WanI2VCrossAttention,
@@ -277,15 +278,151 @@ class NAGWanModel(WanModel):
                                  transformer_options=transformer_options, **kwargs)[:, :, :t, :h, :w]
 
 
+class NAGVaceWanModel(VaceWanModel):
+    def forward_orig(
+        self,
+        x,
+        t,
+        context,
+        vace_context,
+        vace_strength,
+        clip_fea=None,
+        freqs=None,
+        transformer_options={},
+        **kwargs,
+    ):
+        origin_batch_size = context.shape[0] - x.shape[0]
+
+        # embeddings
+        x = self.patch_embedding(x.float()).to(x.dtype)
+        grid_sizes = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+
+        # time embeddings
+        e = self.time_embedding(
+            sinusoidal_embedding_1d(self.freq_dim, t).to(dtype=x[0].dtype))
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim))
+
+        # context
+        context = self.text_embedding(context)
+
+        context_img_len = None
+        if clip_fea is not None:
+            if self.img_emb is not None:
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = torch.cat([context_clip, context_clip[-origin_batch_size:]])
+                context = torch.concat([context_clip, context], dim=1)
+            context_img_len = clip_fea.shape[-2]
+
+        orig_shape = list(vace_context.shape)
+        vace_context = vace_context.movedim(0, 1).reshape([-1] + orig_shape[2:])
+        c = self.vace_patch_embedding(vace_context.float()).to(vace_context.dtype)
+        c = c.flatten(2).transpose(1, 2)
+        c = list(c.split(orig_shape[0], dim=0))
+
+        # arguments
+        x_orig = x
+
+        patches_replace = transformer_options.get("patches_replace", {})
+        blocks_replace = patches_replace.get("dit", {})
+        for i, block in enumerate(self.blocks):
+            if ("double_block", i) in blocks_replace:
+                def block_wrap(args):
+                    out = {}
+                    out["img"] = block(args["img"], context=args["txt"], e=args["vec"], freqs=args["pe"], context_img_len=context_img_len)
+                    return out
+                out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": e0, "pe": freqs}, {"original_block": block_wrap})
+                x = out["img"]
+            else:
+                x = block(x, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
+
+            ii = self.vace_layers_mapping.get(i, None)
+            if ii is not None:
+                for iii in range(len(c)):
+                    c_skip, c[iii] = self.vace_blocks[ii](c[iii], x=x_orig, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
+                    x += c_skip * vace_strength[iii]
+                del c_skip
+        # head
+        x = self.head(x, e)
+
+        # unpatchify
+        x = self.unpatchify(x, grid_sizes)
+        return x
+
+    def forward(
+            self,
+            x,
+            timestep,
+            context,
+            clip_fea=None,
+            time_dim_concat=None,
+            transformer_options={},
+
+            positive_context=None,
+            nag_negative_context=None,
+
+            **kwargs,
+    ):
+        if context.shape[0] != nag_negative_context.shape[0] \
+                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+            origin_context_len = context.shape[1]
+            context = cat_context(context, nag_negative_context, trim_context=True)
+            context_pad_len = context.shape[1] - origin_context_len
+            nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
+
+            self.forward_orig = MethodType(NAGVaceWanModel.forward_orig, self)
+            for name, module in self.named_modules():
+                if "cross_attn" in name and isinstance(module, WanSelfAttention):
+                    module.forward = MethodType(
+                        partial(
+                            NAGWanT2VCrossAttention.forward,
+                            context_pad_len=context_pad_len,
+                            nag_pad_len=nag_pad_len,
+                        ),
+                        module,
+                    )
+        else:
+            self.forward_orig = MethodType(VaceWanModel.forward_orig, self)
+            for name, module in self.named_modules():
+                if "cross_attn" in name and isinstance(module, WanSelfAttention):
+                    module.forward = MethodType(WanT2VCrossAttention.forward, module)
+
+        bs, c, t, h, w = x.shape
+        x = comfy.ldm.common_dit.pad_to_patch_size(x, self.patch_size)
+
+        patch_size = self.patch_size
+        t_len = ((t + (patch_size[0] // 2)) // patch_size[0])
+        h_len = ((h + (patch_size[1] // 2)) // patch_size[1])
+        w_len = ((w + (patch_size[2] // 2)) // patch_size[2])
+
+        if time_dim_concat is not None:
+            time_dim_concat = comfy.ldm.common_dit.pad_to_patch_size(time_dim_concat, self.patch_size)
+            x = torch.cat([x, time_dim_concat], dim=2)
+            t_len = ((x.shape[2] + (patch_size[0] // 2)) // patch_size[0])
+
+        img_ids = torch.zeros((t_len, h_len, w_len, 3), device=x.device, dtype=x.dtype)
+        img_ids[:, :, :, 0] = img_ids[:, :, :, 0] + torch.linspace(0, t_len - 1, steps=t_len, device=x.device,
+                                                                   dtype=x.dtype).reshape(-1, 1, 1)
+        img_ids[:, :, :, 1] = img_ids[:, :, :, 1] + torch.linspace(0, h_len - 1, steps=h_len, device=x.device,
+                                                                   dtype=x.dtype).reshape(1, -1, 1)
+        img_ids[:, :, :, 2] = img_ids[:, :, :, 2] + torch.linspace(0, w_len - 1, steps=w_len, device=x.device,
+                                                                   dtype=x.dtype).reshape(1, 1, -1)
+        img_ids = repeat(img_ids, "t h w c -> b (t h w) c", b=bs)
+
+        freqs = self.rope_embedder(img_ids).movedim(1, 2)
+        return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs,
+                                 transformer_options=transformer_options, **kwargs)[:, :, :t, :h, :w]
+
+
 def set_nag_wan(
         model: WanModel,
         positive_context,
         nag_negative_cond,
         nag_scale, nag_tau, nag_alpha):
-    model.forward_orig = MethodType(NAGWanModel.forward_orig, model)
+    nag_model_cls = NAGVaceWanModel if isinstance(model, VaceWanModel) else NAGWanModel
     model.forward = MethodType(
         partial(
-            NAGWanModel.forward,
+            nag_model_cls.forward,
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
         ),
@@ -299,8 +436,9 @@ def set_nag_wan(
 
 
 def set_origin_wan(model: NAGWanModel):
-    model.forward_orig = MethodType(WanModel.forward_orig, model)
-    model.forward = MethodType(WanModel.forward, model)
+    origin_model_cls = VaceWanModel if isinstance(model, VaceWanModel) else NAGWanModel
+    model.forward_orig = MethodType(origin_model_cls.forward_orig, model)
+    model.forward = MethodType(origin_model_cls.forward, model)
     cross_attn_cls = WanT2VCrossAttention if model.model_type == "t2v" else WanI2VCrossAttention
     for name, module in model.named_modules():
         if "cross_attn" in name and isinstance(module, WanSelfAttention):

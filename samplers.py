@@ -25,7 +25,7 @@ from comfy.ldm.flux.model import Flux
 from comfy.ldm.chroma.model import Chroma
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper
-from comfy.ldm.wan.model import WanModel
+from comfy.ldm.wan.model import WanModel, VaceWanModel
 from comfy.ldm.hunyuan_video.model import HunyuanVideo
 
 from .flux.model import set_nag_flux, set_origin_flux
@@ -124,7 +124,7 @@ class NAGCFGGuider(CFGGuider):
             elif model_type == OpenAISignatureMMDITWrapper:
                 set_fn = set_nag_sd3
                 reset_fn = set_origin_sd3
-            elif model_type == WanModel:
+            elif model_type in [WanModel, VaceWanModel]:
                 set_fn = set_nag_wan
                 reset_fn = set_origin_wan
             elif model_type == HunyuanVideo:
