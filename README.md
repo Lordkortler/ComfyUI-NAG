@@ -16,6 +16,8 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## News
 
+**2025-06-26:** Hunyuan video is now supported!
+
 **2025-06-25:** Wan video generation is now supported (GGUF compatible)! Try it out with the new [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Wan-Fast-ComfyUI-Workflow.json)!
 
 ## Nodes
@@ -27,7 +29,7 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 To use NAG, simply replace the `CFGGuider` node with `NAGCFGGuider`, or the `KSampler` node with `KSamplerWithNAG` in your workflow.
 
-We currently support `Flux`, `Choroma`, `SD3.5` and `SDXL`.
+We currently support `Flux`, `Wan`, `Vace Wan`, `Hunyuan Video`, `Choroma`, `SD3.5`, `SDXL` and `SD`.
 
 Example workflows are available in the `./workflows` directory!
 
@@ -35,7 +37,9 @@ Example workflows are available in the `./workflows` directory!
 
 ## Key Inputs
 
-We recommend tuning `nag_scale` for most use cases.
+When working with a new model, it's recommended to first find a good combination of `nag_tau` and `nag_alpha`, which ensures that the negative guidance is effective without introducing artifacts.
+
+Once you're satisfied, keep `nag_tau` and `nag_alpha` fixed and tune only `nag_scale` in most cases to control the strength of guidance.
 
 - `nag_scale`: The scale for attention feature extrapolation. Higher values result in stronger negative guidance.
 - `nag_tau`: The normalisation threshold. Higher values result in stronger negative guidance.
