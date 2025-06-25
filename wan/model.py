@@ -121,25 +121,11 @@ class NAGWanI2VCrossAttention(WanI2VCrossAttention):
         x_negative = optimized_attention(q_negative, k_negative, v_negative, heads=self.num_heads)
 
         x_positive = x[-origin_bsz:]
-        x_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
-        norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True).expand(*x_positive.shape)
-        norm_guidance = torch.norm(x_guidance, p=1, dim=-1, keepdim=True).expand(*x_guidance.shape)
-
-        scale = norm_guidance / norm_positive
-        x_guidance = x_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
-
-        x_guidance = x_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
+        x_guidance = nag(x_positive, x_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
         x = torch.cat([x[:-origin_bsz], x_guidance], dim=0)
 
         img_x_positive = img_x[-origin_bsz:]
-        img_x_guidance = img_x_positive * self.nag_scale - img_x_negative * (self.nag_scale - 1)
-        norm_positive = torch.norm(img_x_positive, p=1, dim=-1, keepdim=True).expand(*img_x_positive.shape)
-        norm_guidance = torch.norm(img_x_guidance, p=1, dim=-1, keepdim=True).expand(*img_x_guidance.shape)
-
-        scale = norm_guidance / norm_positive
-        img_x_guidance = img_x_guidance * torch.minimum(scale, scale.new_ones(1) * self.nag_tau) / scale
-
-        img_x_guidance = img_x_guidance * self.nag_alpha + img_x_positive * (1 - self.nag_alpha)
+        img_x_guidance = nag(img_x_positive, img_x_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
         img_x = torch.cat([img_x[:-origin_bsz], img_x_guidance], dim=0)
 
         # output
