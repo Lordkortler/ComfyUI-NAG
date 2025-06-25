@@ -16,9 +16,9 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## News
 
-**2025-06-26:** Hunyuan video is now supported!
+2025-06-26: Hunyuan video is now supported!
 
-**2025-06-25:** Wan video generation is now supported (GGUF compatible)! Try it out with the new [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Wan-Fast-ComfyUI-Workflow.json)!
+2025-06-25: Wan video generation is now supported (GGUF compatible)! Try it out with the new [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Wan-Fast-ComfyUI-Workflow.json)!
 
 ## Nodes
 
@@ -44,3 +44,9 @@ Once you're satisfied, keep `nag_tau` and `nag_alpha` fixed and tune only `nag_s
 - `nag_scale`: The scale for attention feature extrapolation. Higher values result in stronger negative guidance.
 - `nag_tau`: The normalisation threshold. Higher values result in stronger negative guidance.
 - `nag_alpha`: Blending factor between original and extrapolated attention. Higher values result in stronger negative guidance.
+
+### Rule of Thumb
+
+- For image-reference tasks (e.g., Image2Video), use lower `nag_tau` and `nag_alpha` to preserve the reference content more faithfully.
+- For models that require more sampling steps and higher CFG, also prefer lower `nag_tau` and `nag_alpha`.
+- For few-step models, you can use higher `nag_tau` and `nag_alpha` to have stronger negative guidance.
