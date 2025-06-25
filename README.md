@@ -14,6 +14,10 @@ LTX Video Demo: https://huggingface.co/spaces/ChenDY/NAG_ltx-video-distilled
 
 Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
+## News
+
+**2025-06-25:** Wan video generation is now supported (GGUF compatible)! Try it out with the new [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Wan-Fast-ComfyUI-Workflow.json)!
+
 ## Nodes
 
 - `NAGCFGGuider`
