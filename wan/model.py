@@ -116,7 +116,7 @@ class NAGWanI2VCrossAttention(WanI2VCrossAttention):
         v_img, v_img_negative = v_img[:-origin_bsz], v_img[-origin_bsz:]
 
         img_x = optimized_attention(q, k_img, v_img, heads=self.num_heads)
-        img_x_negative = optimized_attention(q_negative, k_img_negative, v_negative, heads=self.num_heads)
+        img_x_negative = optimized_attention(q_negative, k_img_negative, v_img_negative, heads=self.num_heads)
         x = optimized_attention(q, k, v, heads=self.num_heads)
         x_negative = optimized_attention(q_negative, k_negative, v_negative, heads=self.num_heads)
 
@@ -183,7 +183,7 @@ class NAGWanModel(WanModel):
         if clip_fea is not None:
             if self.img_emb is not None:
                 context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-                context_clip = torch.cat([context_clip, context_clip[context.shape[0] - context_clip.shape[0]]])
+                context_clip = torch.cat([context_clip, context_clip[-context.shape[0] - context_clip.shape[0]:]])
                 context = torch.concat([context_clip, context], dim=1)
             context_img_len = clip_fea.shape[-2]
 
@@ -231,6 +231,7 @@ class NAGWanModel(WanModel):
             context_pad_len = context.shape[1] - origin_context_len
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
+            self.forward_orig = MethodType(NAGWanModel.forward_orig, self)
             cross_attn_cls = NAGWanT2VCrossAttention if self.model_type == "t2v" else NAGWanI2VCrossAttention
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
@@ -243,6 +244,7 @@ class NAGWanModel(WanModel):
                         module,
                     )
         else:
+            self.forward_orig = MethodType(WanModel.forward_orig, self)
             cross_attn_cls = WanT2VCrossAttention if self.model_type == "t2v" else WanI2VCrossAttention
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
