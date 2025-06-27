@@ -63,8 +63,11 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
         img_k_negative = img_k[-origin_bsz:]
         img_v_negative = img_v[-origin_bsz:]
 
-        pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
-        pe = pe[:, :, context_pad_len:]
+        pe_negative = pe[-origin_bsz:]
+        if nag_pad_len > 0:
+            pe_negative = pe_negative[:, :, :-nag_pad_len]
+        if context_pad_len > 0:
+            pe = pe[:, :, :-context_pad_len]
 
         if self.flipped_img_txt:
             # run actual attention
@@ -148,7 +151,8 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             attn_mask=None,
             modulation_dims=None,
 
-            txt_length:int = None,
+            txt_length: int = None,
+            img_length: int = None,
             origin_bsz: int = None,
             context_pad_len: int = None,
             nag_pad_len: int = None,
@@ -160,32 +164,74 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         q, k = self.norm(q, k, v)
 
         # NAG
-        q, q_negative = q[:-origin_bsz, :, context_pad_len:], q[-origin_bsz:, :, nag_pad_len:]
-        k, k_negative = k[:-origin_bsz, :, context_pad_len:], k[-origin_bsz:, :, nag_pad_len:]
-        v, v_negative = v[:-origin_bsz, :, context_pad_len:], v[-origin_bsz:, :, nag_pad_len:]
+        if txt_length is not None:
+            def remove_pad_and_get_neg(feature, pad_dim=2):
+                assert pad_dim in [1, 2]
+                if pad_dim == 2:
+                    feature_negative = feature[-origin_bsz:, :, nag_pad_len:]
+                    feature = feature[:-origin_bsz, :, context_pad_len:]
+                else:
+                    feature_negative = feature[-origin_bsz:, nag_pad_len:]
+                    feature = feature[:-origin_bsz, context_pad_len:]
 
-        pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
-        pe = pe[:, :, context_pad_len:]
+                return feature_negative, feature
+
+        else:
+            def remove_pad_and_get_neg(feature, pad_dim=2):
+                assert pad_dim in [1, 2]
+                if pad_dim == 2:
+                    feature_negative = torch.cat([feature[-origin_bsz:, :, :img_length], feature[-origin_bsz:, :, img_length + nag_pad_len:]], dim=2)
+                    feature = torch.cat([feature[:-origin_bsz, :, :img_length], feature[:-origin_bsz, :, img_length + context_pad_len:]], dim=2)
+                else:
+                    feature_negative = torch.cat([feature[-origin_bsz:, :img_length], feature[-origin_bsz:, img_length + nag_pad_len:]], dim=1)
+                    feature = torch.cat([feature[:-origin_bsz, :img_length], feature[:-origin_bsz, img_length + context_pad_len:]], dim=1)
+                return feature_negative, feature
+
+        q_negative, q = remove_pad_and_get_neg(q)
+        k_negative, k = remove_pad_and_get_neg(k)
+        v_negative, v = remove_pad_and_get_neg(v)
+        pe_negative = pe[-origin_bsz:]
+        pe = pe[:-origin_bsz]
+        if nag_pad_len > 0:
+            pe_negative = pe_negative[:, :, :-nag_pad_len]
+        if context_pad_len > 0:
+            pe = pe[:, :, :-context_pad_len]
 
         # compute attention
         attn_negative = attention(q_negative, k_negative, v_negative, pe=pe_negative, mask=attn_mask)
         attn = attention(q, k, v, pe=pe, mask=attn_mask)
 
-        img_attn_negative = attn_negative[:, txt_length - nag_pad_len:]
-        img_attn = attn[:, txt_length - context_pad_len:]
+        if txt_length is not None:
+            img_attn_negative = attn_negative[:, txt_length - nag_pad_len:]
+            img_attn = attn[:, txt_length - context_pad_len:]
+        else:
+            img_attn_negative = attn_negative[:, :img_length]
+            img_attn = attn[:, :img_length]
 
         img_attn_positive = img_attn[-origin_bsz:]
         img_attn_guidance = nag(img_attn_positive, img_attn_negative, self.nag_scale, self.nag_tau, self.nag_alpha)
 
-        attn_negative[:, txt_length - nag_pad_len:] = img_attn_guidance
-        attn[-origin_bsz:, txt_length - context_pad_len:] = img_attn_guidance
+        if txt_length is not None:
+            attn_negative[:, txt_length - nag_pad_len:] = img_attn_guidance
+            attn[-origin_bsz:, txt_length - context_pad_len:] = img_attn_guidance
+        else:
+            attn_negative[:, :img_length] = img_attn_guidance
+            attn[-origin_bsz:, :img_length] = img_attn_guidance
 
         # compute activation in mlp stream, cat again and run second linear layer
-        output_negative = self.linear2(torch.cat((attn_negative, self.mlp_act(mlp[-origin_bsz:, nag_pad_len:])), 2))
-        output = self.linear2(torch.cat((attn, self.mlp_act(mlp[:-origin_bsz, context_pad_len:])), 2))
+        mlp_negative, mlp = remove_pad_and_get_neg(mlp, pad_dim=1)
+        output_negative = self.linear2(torch.cat((attn_negative, self.mlp_act(mlp_negative)), 2))
+        output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
 
-        x[:-origin_bsz, context_pad_len:] += apply_mod(output, mod.gate[:-origin_bsz], None, modulation_dims)
-        x[-origin_bsz:, nag_pad_len:] += apply_mod(output_negative, mod.gate[-origin_bsz:], None, modulation_dims)
+        if txt_length is not None:
+            x[:-origin_bsz, context_pad_len:] += apply_mod(output, mod.gate[:-origin_bsz], None, modulation_dims)
+            x[-origin_bsz:, nag_pad_len:] += apply_mod(output_negative, mod.gate[-origin_bsz:], None, modulation_dims)
+        else:
+            x[:-origin_bsz, :img_length] += apply_mod(output[:, :img_length], mod.gate[:-origin_bsz], None, modulation_dims)
+            x[:-origin_bsz, img_length + context_pad_len:] += apply_mod(output[:, img_length:], mod.gate[:-origin_bsz], None, modulation_dims)
+            x[-origin_bsz:, :img_length] += apply_mod(output_negative[:, :img_length], mod.gate[-origin_bsz:], None, modulation_dims)
+            x[-origin_bsz:, img_length + nag_pad_len:] += apply_mod(output_negative[:, img_length:], mod.gate[-origin_bsz:], None, modulation_dims)
+
         if x.dtype == torch.float16:
             x = torch.nan_to_num(x, nan=0.0, posinf=65504, neginf=-65504)
         return x
