@@ -45,7 +45,7 @@ class NAGCFGGuider:
                         "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                         "nag_tau": ("FLOAT", {"default": 2.5, "min": 1.0, "max": 10.0, "step":0.1, "round": 0.01}),
                         "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
-                        "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
+                        "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 20.0, "step":0.01, "round": 0.01}),
                         "latent_image": ("LATENT", ),
                      }
                 }
@@ -89,7 +89,7 @@ class KSamplerWithNAG:
                 "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                 "nag_tau": ("FLOAT", {"default": 2.5, "min": 1.0, "max": 10.0, "step":0.1, "round": 0.01}),
                 "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
-                "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
+                "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 20.0, "step":0.01, "round": 0.01}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS, {"tooltip": "The algorithm used when sampling, this can affect the quality, speed, and style of the generated output."}),
                 "scheduler": (comfy.samplers.KSampler.SCHEDULERS, {"tooltip": "The scheduler controls how noise is gradually removed to form the image."}),
                 "positive": ("CONDITIONING", {"tooltip": "The conditioning describing the attributes you want to include in the image."}),
