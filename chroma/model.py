@@ -149,11 +149,15 @@ class NAGChroma(Chroma):
 
             positive_context=None,
             nag_negative_context=None,
+            nag_sigma_end=0.,
 
             **kwargs,
     ):
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
+        if apply_nag and positive_batch:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
             context_pad_len = context.shape[1] - origin_context_len
@@ -209,7 +213,7 @@ def set_nag_chroma(
         model: Chroma,
         positive_context,
         nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha,
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
 ):
     model.forward_orig = MethodType(NAGChroma.forward_orig, model)
     model.forward = MethodType(
@@ -218,6 +222,7 @@ def set_nag_chroma(
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
+            nag_sigma_end=nag_sigma_end,
         ),
         model
     )

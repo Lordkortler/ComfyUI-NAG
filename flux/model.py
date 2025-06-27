@@ -94,6 +94,7 @@ class NAGFlux(Flux):
         if img.dtype == torch.float16:
             img = torch.nan_to_num(img, nan=0.0, posinf=65504, neginf=-65504)
 
+        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
         img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((txt, img), 1)
 
@@ -142,16 +143,21 @@ class NAGFlux(Flux):
             positive_context=None,
             nag_negative_context=None,
             nag_negative_y=None,
+            nag_sigma_end=0.,
 
             **kwargs):
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
+        if apply_nag and positive_batch:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
             context_pad_len = context.shape[1] - origin_context_len
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
+            self.forward_orig = MethodType(NAGFlux.forward_orig, self)
             for block in self.double_blocks:
                 block.forward = MethodType(
                     partial(
@@ -201,17 +207,17 @@ def set_nag_flux(
         model: Flux,
         positive_context,
         nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha,
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
 ):
-    model.forward_orig = MethodType(NAGFlux.forward_orig, model)
     model.forward = MethodType(
         partial(
             NAGFlux.forward,
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
+            nag_sigma_end=nag_sigma_end,
         ),
-        model
+        model,
     )
     for block in model.double_blocks:
         block.nag_scale = nag_scale

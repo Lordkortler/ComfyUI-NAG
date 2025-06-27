@@ -22,11 +22,15 @@ class NAGUnetModel(UNetModel):
 
             positive_context=None,
             nag_negative_context=None,
+            nag_sigma_end=0.,
 
             **kwargs,
     ):
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
+        if apply_nag and positive_batch:
             context = cat_context(context, nag_negative_context)
             for name, module in self.named_modules():
                 if "attn2" in name and isinstance(module, CrossAttention):
@@ -48,12 +52,14 @@ def set_nag_sd(
         model: UNetModel,
         positive_context,
         nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha):
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+):
     model.forward = MethodType(
         partial(
             NAGUnetModel.forward,
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
+            nag_sigma_end=nag_sigma_end,
         ),
         model
     )

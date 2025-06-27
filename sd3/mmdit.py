@@ -165,11 +165,15 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             positive_context=None,
             nag_negative_context=None,
             nag_negative_y=None,
+            nag_sigma_end=0.,
 
             **kwargs,
     ) -> torch.Tensor:
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
+        if apply_nag and positive_batch:
             context = cat_context(context, nag_negative_context)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
 
@@ -196,8 +200,9 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
         x = self.x_embedder(x) + comfy.ops.cast_to_input(self.cropped_pos_embed(hw, device=x.device), x)
         c = self.t_embedder(timesteps, dtype=x.dtype)  # (N, D)
 
-        origin_bsz = len(context) - len(x)
-        c = torch.cat((c, c[-origin_bsz:]), dim=0)
+        if apply_nag and positive_batch:
+            origin_bsz = len(context) - len(x)
+            c = torch.cat((c, c[-origin_bsz:]), dim=0)
 
         if y is not None and self.y_embedder is not None:
             y = self.y_embedder(y)  # (N, D)
@@ -216,7 +221,8 @@ def set_nag_sd3(
         model: OpenAISignatureMMDITWrapper,
         positive_context,
         nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha):
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+):
     model.nag_scale = nag_scale
     model.nag_tau = nag_tau
     model.nag_alpha = nag_alpha
@@ -226,6 +232,7 @@ def set_nag_sd3(
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
+            nag_sigma_end=nag_sigma_end,
         ),
         model
     )

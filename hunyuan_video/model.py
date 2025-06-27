@@ -99,6 +99,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                     if add is not None:
                         img += add
 
+        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
         img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((img, txt), 1)
 
@@ -152,11 +153,18 @@ class NAGHunyuanVideo(HunyuanVideo):
             positive_context=None,
             nag_negative_context=None,
             nag_negative_y=None,
+            nag_sigma_end=0.,
 
             **kwargs,
     ):
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        bs, c, t, h, w = x.shape
+        img_ids = self.img_ids(x)
+
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
+        if apply_nag and positive_batch:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
@@ -173,11 +181,12 @@ class NAGHunyuanVideo(HunyuanVideo):
                     ),
                     block,
                 )
+
             for block in self.single_blocks:
                 block.forward = MethodType(
                     partial(
                         NAGSingleStreamBlock.forward,
-                        txt_length=context.shape[1],
+                        img_length=img_ids.shape[1],
                         origin_bsz=nag_negative_context.shape[0],
                         context_pad_len=context_pad_len,
                         nag_pad_len=nag_pad_len,
@@ -191,8 +200,6 @@ class NAGHunyuanVideo(HunyuanVideo):
             for block in self.single_blocks:
                 block.forward = MethodType(SingleStreamBlock.forward, block)
 
-        bs, c, t, h, w = x.shape
-        img_ids = self.img_ids(x)
         txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
         out = self.forward_orig(x, img_ids, context, txt_ids, attention_mask, timestep, y, guidance,
                                 guiding_frame_index, ref_latent, control=control,
@@ -204,7 +211,7 @@ def set_nag_hunyuan_video(
         model: HunyuanVideo,
         positive_context,
         nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha,
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
 ):
     model.forward = MethodType(
         partial(
@@ -212,6 +219,7 @@ def set_nag_hunyuan_video(
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
+            nag_sigma_end=nag_sigma_end,
         ),
         model,
     )

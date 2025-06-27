@@ -41,7 +41,7 @@ def sample_with_nag(
         noise,
         positive, negative, nag_negative,
         cfg,
-        nag_scale, nag_tau, nag_alpha,
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
         device,
         sampler,
         sigmas,
@@ -52,7 +52,7 @@ def sample_with_nag(
     guider.set_conds(positive, negative)
     guider.set_cfg(cfg)
     guider.set_batch_size(latent_image.shape[0])
-    guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha)
+    guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha, nag_sigma_end)
     return guider.sample(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed)
 
 
@@ -63,16 +63,18 @@ class NAGCFGGuider(CFGGuider):
         self.nag_scale = 5.0
         self.nag_tau = 3.5
         self.nag_alpha = 0.25
+        self.nag_sigma_end = 0.
         self.batch_size = 1
 
     def set_batch_size(self, batch_size):
         self.batch_size = batch_size
 
-    def set_nag(self, nag_negative_cond, nag_scale, nag_tau, nag_alpha):
+    def set_nag(self, nag_negative_cond, nag_scale, nag_tau, nag_alpha, nag_sigma_end):
         self.origin_nag_negative_cond = nag_negative_cond
         self.nag_scale = nag_scale
         self.nag_tau = nag_tau
         self.nag_alpha = nag_alpha
+        self.nag_sigma_end = nag_sigma_end
 
     def __call__(self, *args, **kwargs):
         return self.predict_noise(*args, **kwargs)
@@ -142,7 +144,7 @@ class NAGCFGGuider(CFGGuider):
                 model,
                 positive_context.expand(self.batch_size, -1, -1),
                 self.nag_negative_cond,
-                self.nag_scale, self.nag_tau, self.nag_alpha,
+                self.nag_scale, self.nag_tau, self.nag_alpha, self.nag_sigma_end,
             )
 
         try:
@@ -180,7 +182,7 @@ class KSamplerWithNAG(KSampler):
             noise,
             positive, negative, nag_negative,
             cfg,
-            nag_scale, nag_tau, nag_alpha,
+            nag_scale, nag_tau, nag_alpha, nag_sigma_end,
             latent_image=None,
             start_step=None, last_step=None, force_full_denoise=False,
             denoise_mask=None,
@@ -210,7 +212,7 @@ class KSamplerWithNAG(KSampler):
             noise,
             positive, negative, nag_negative,
             cfg,
-            nag_scale, nag_tau, nag_alpha,
+            nag_scale, nag_tau, nag_alpha, nag_sigma_end,
             self.device,
             sampler,
             sigmas,

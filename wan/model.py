@@ -222,11 +222,15 @@ class NAGWanModel(WanModel):
 
             positive_context=None,
             nag_negative_context=None,
+            nag_sigma_end=0.,
 
             **kwargs,
     ):
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context))))
+        if apply_nag and positive_batch:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
             context_pad_len = context.shape[1] - origin_context_len
@@ -360,11 +364,15 @@ class NAGVaceWanModel(VaceWanModel):
 
             positive_context=None,
             nag_negative_context=None,
+            nag_sigma_end=0.,
 
             **kwargs,
     ):
-        if context.shape[0] != nag_negative_context.shape[0] \
-                or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))):
+        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
+        positive_batch = \
+            context.shape[0] != nag_negative_context.shape[0] \
+            or (context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context))))
+        if apply_nag and positive_batch:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
             context_pad_len = context.shape[1] - origin_context_len
@@ -418,13 +426,15 @@ def set_nag_wan(
         model: WanModel,
         positive_context,
         nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha):
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+):
     nag_model_cls = NAGVaceWanModel if isinstance(model, VaceWanModel) else NAGWanModel
     model.forward = MethodType(
         partial(
             nag_model_cls.forward,
             positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
+            nag_sigma_end=nag_sigma_end,
         ),
         model,
     )
@@ -436,7 +446,7 @@ def set_nag_wan(
 
 
 def set_origin_wan(model: NAGWanModel):
-    origin_model_cls = VaceWanModel if isinstance(model, VaceWanModel) else NAGWanModel
+    origin_model_cls = VaceWanModel if isinstance(model, VaceWanModel) else WanModel
     model.forward_orig = MethodType(origin_model_cls.forward_orig, model)
     model.forward = MethodType(origin_model_cls.forward, model)
     cross_attn_cls = WanT2VCrossAttention if model.model_type == "t2v" else WanI2VCrossAttention

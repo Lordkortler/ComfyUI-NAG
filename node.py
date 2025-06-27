@@ -6,7 +6,7 @@ from .samplers import NAGCFGGuider as samplers_NAGCFGGuider
 from .sample import sample_with_nag
 
 
-def common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, sampler_name, scheduler, positive, negative, nag_negative, latent, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False):
+def common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler_name, scheduler, positive, negative, nag_negative, latent, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False):
     latent_image = latent["samples"]
     latent_image = comfy.sample.fix_empty_latent_channels(model, latent_image)
 
@@ -23,7 +23,7 @@ def common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_al
     callback = latent_preview.prepare_callback(model, steps)
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     samples = sample_with_nag(
-        model, noise, steps, cfg, nag_scale, nag_tau, nag_alpha, sampler_name, scheduler, positive, negative, nag_negative, latent_image,
+        model, noise, steps, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler_name, scheduler, positive, negative, nag_negative, latent_image,
         denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
         force_full_denoise=force_full_denoise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed,
     )
@@ -45,6 +45,7 @@ class NAGCFGGuider:
                         "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                         "nag_tau": ("FLOAT", {"default": 2.5, "min": 1.0, "max": 10.0, "step":0.1, "round": 0.01}),
                         "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
+                        "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
                         "latent_image": ("LATENT", ),
                      }
                 }
@@ -64,6 +65,7 @@ class NAGCFGGuider:
             nag_scale,
             nag_tau,
             nag_alpha,
+            nag_sigma_end,
             latent_image,
     ):
         batch_size = latent_image["samples"].shape[0]
@@ -71,7 +73,7 @@ class NAGCFGGuider:
         guider.set_conds(positive, negative)
         guider.set_cfg(cfg)
         guider.set_batch_size(batch_size)
-        guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha)
+        guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha, nag_sigma_end)
         return (guider,)
 
 
@@ -87,6 +89,7 @@ class KSamplerWithNAG:
                 "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                 "nag_tau": ("FLOAT", {"default": 2.5, "min": 1.0, "max": 10.0, "step":0.1, "round": 0.01}),
                 "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
+                "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step":0.01, "round": 0.01}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS, {"tooltip": "The algorithm used when sampling, this can affect the quality, speed, and style of the generated output."}),
                 "scheduler": (comfy.samplers.KSampler.SCHEDULERS, {"tooltip": "The scheduler controls how noise is gradually removed to form the image."}),
                 "positive": ("CONDITIONING", {"tooltip": "The conditioning describing the attributes you want to include in the image."}),
@@ -104,8 +107,8 @@ class KSamplerWithNAG:
     CATEGORY = "sampling"
     DESCRIPTION = "Uses the provided model, positive and negative conditioning to denoise the latent image."
 
-    def sample(self, model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, sampler_name, scheduler, positive, negative, nag_negative, latent_image, denoise=1.0):
-        return common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, sampler_name, scheduler, positive, negative, nag_negative, latent_image, denoise=denoise)
+    def sample(self, model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler_name, scheduler, positive, negative, nag_negative, latent_image, denoise=1.0):
+        return common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler_name, scheduler, positive, negative, nag_negative, latent_image, denoise=denoise)
 
 
 NODE_CLASS_MAPPINGS = {
