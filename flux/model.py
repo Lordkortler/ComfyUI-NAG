@@ -137,6 +137,7 @@ class NAGFlux(Flux):
             context,
             y=None,
             guidance=None,
+            ref_latents=None,
             control=None,
             transformer_options={},
 
@@ -145,7 +146,8 @@ class NAGFlux(Flux):
             nag_negative_y=None,
             nag_sigma_end=0.,
 
-            **kwargs):
+            **kwargs,
+    ):
         apply_nag = transformer_options["sigmas"] >= nag_sigma_end
         positive_batch = \
             context.shape[0] != nag_negative_context.shape[0] \
@@ -185,22 +187,35 @@ class NAGFlux(Flux):
             for block in self.single_blocks:
                 block.forward = MethodType(SingleStreamBlock.forward, block)
 
-        bs, c, h, w = x.shape
+        bs, c, h_orig, w_orig = x.shape
         patch_size = self.patch_size
-        x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
 
-        img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size)
+        h_len = ((h_orig + (patch_size // 2)) // patch_size)
+        w_len = ((w_orig + (patch_size // 2)) // patch_size)
+        img, img_ids = self.process_img(x)
+        img_tokens = img.shape[1]
+        if ref_latents is not None:
+            h = 0
+            w = 0
+            for ref in ref_latents:
+                h_offset = 0
+                w_offset = 0
+                if ref.shape[-2] + h > ref.shape[-1] + w:
+                    w_offset = w
+                else:
+                    h_offset = h
 
-        h_len = ((h + (patch_size // 2)) // patch_size)
-        w_len = ((w + (patch_size // 2)) // patch_size)
-        img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
-        img_ids[:, :, 1] = img_ids[:, :, 1] + torch.linspace(0, h_len - 1, steps=h_len, device=x.device, dtype=x.dtype).unsqueeze(1)
-        img_ids[:, :, 2] = img_ids[:, :, 2] + torch.linspace(0, w_len - 1, steps=w_len, device=x.device, dtype=x.dtype).unsqueeze(0)
-        img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+                kontext, kontext_ids = self.process_img(ref, index=1, h_offset=h_offset, w_offset=w_offset)
+                img = torch.cat([img, kontext], dim=1)
+                img_ids = torch.cat([img_ids, kontext_ids], dim=1)
+                h = max(h, ref.shape[-2] + h_offset)
+                w = max(w, ref.shape[-1] + w_offset)
 
         txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
-        out = self.forward_orig(img, img_ids, context, txt_ids, timestep, y, guidance, control, transformer_options, attn_mask=kwargs.get("attention_mask", None))
-        return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+        out = self.forward_orig(img, img_ids, context, txt_ids, timestep, y, guidance, control, transformer_options,
+                                attn_mask=kwargs.get("attention_mask", None))
+        out = out[:, :img_tokens]
+        return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:, :, :h_orig, :w_orig]
 
 
 def set_nag_flux(
