@@ -12,7 +12,7 @@ from comfy.ldm.modules.diffusionmodules.mmdit import (
     default,
 )
 
-from ..utils import nag, cat_context
+from ..utils import nag, cat_context, check_nag_activation
 
 
 def _nag_block_mixing(
@@ -169,11 +169,8 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
 
             **kwargs,
     ) -> torch.Tensor:
-        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
-        positive_batch = \
-            context.shape[0] != nag_negative_context.shape[0] \
-            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
-        if apply_nag and positive_batch:
+        apply_nag = check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end)
+        if apply_nag:
             context = cat_context(context, nag_negative_context)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
 
@@ -200,7 +197,7 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
         x = self.x_embedder(x) + comfy.ops.cast_to_input(self.cropped_pos_embed(hw, device=x.device), x)
         c = self.t_embedder(timesteps, dtype=x.dtype)  # (N, D)
 
-        if apply_nag and positive_batch:
+        if apply_nag:
             origin_bsz = len(context) - len(x)
             c = torch.cat((c, c[-origin_bsz:]), dim=0)
 

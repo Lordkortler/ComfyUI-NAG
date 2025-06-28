@@ -31,3 +31,12 @@ def cat_context(context, nag_negative_context, trim_context=False):
     nag_negative_context = nag_negative_context[:, -context_len:]
 
     return torch.cat([context, nag_negative_context], dim=0)
+
+
+def check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end):
+    apply_nag = torch.all(transformer_options["sigmas"] >= nag_sigma_end)
+    positive_batch = \
+        context.shape[0] != nag_negative_context.shape[0] \
+        or (context.shape[1] == positive_context.shape[1] and torch.all(
+            torch.isclose(context, positive_context.to(context))))
+    return apply_nag and positive_batch

@@ -14,7 +14,7 @@ from comfy.ldm.chroma.layers import (
 from comfy.ldm.chroma.model import Chroma
 
 from .layers import NAGDoubleStreamBlock, NAGSingleStreamBlock
-from ..utils import cat_context
+from ..utils import cat_context, check_nag_activation
 
 
 class NAGChroma(Chroma):
@@ -153,11 +153,8 @@ class NAGChroma(Chroma):
 
             **kwargs,
     ):
-        apply_nag = transformer_options["sigmas"] >= nag_sigma_end
-        positive_batch = \
-            context.shape[0] != nag_negative_context.shape[0] \
-            or context.shape[1] == positive_context.shape[1] and torch.all(torch.isclose(context, positive_context.to(context)))
-        if apply_nag and positive_batch:
+        apply_nag = check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end)
+        if apply_nag:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
             context_pad_len = context.shape[1] - origin_context_len
