@@ -16,11 +16,11 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## News
 
-2025-06-28: Flux Kontext is supported!
+2025-06-28: `Flux Kontext` is now supported. Check out the [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Flux-Kontext-Dev-ComfyUI-Workflow.json)!
 
-2025-06-26: Hunyuan video is now supported!
+2025-06-26: `Hunyuan video` is now supported!
 
-2025-06-25: Wan video generation is now supported (GGUF compatible)! Try it out with the new [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Wan-Fast-ComfyUI-Workflow.json)!
+2025-06-25: `Wan` video generation is now supported (GGUF compatible)! Try it out with the new [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Wan-Fast-ComfyUI-Workflow.json)!
 
 ## Nodes
 
@@ -31,7 +31,7 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 To use NAG, simply replace the `CFGGuider` node with `NAGCFGGuider`, or the `KSampler` node with `KSamplerWithNAG` in your workflow.
 
-We currently support `Flux`, `Wan`, `Vace Wan`, `Hunyuan Video`, `Choroma`, `SD3.5`, `SDXL` and `SD`.
+We currently support `Flux`, `Flux Kontext`, `Wan`, `Vace Wan`, `Hunyuan Video`, `Choroma`, `SD3.5`, `SDXL` and `SD`.
 
 Example workflows are available in the `./workflows` directory!
 
@@ -43,9 +43,14 @@ When working with a new model, it's recommended to first find a good combination
 
 Once you're satisfied, keep `nag_tau` and `nag_alpha` fixed and tune only `nag_scale` in most cases to control the strength of guidance.
 
+Using `nag_sigma_end` to reduce computation without much quality drop.
+
+For flow-based models like `Flux`, `nag_sigma_end = 0.75` achieves near-identical results with significantly improved speed. For diffusion-based `SDXL`, a good default is `nag_sigma_end = 4`.
+
 - `nag_scale`: The scale for attention feature extrapolation. Higher values result in stronger negative guidance.
 - `nag_tau`: The normalisation threshold. Higher values result in stronger negative guidance.
 - `nag_alpha`: Blending factor between original and extrapolated attention. Higher values result in stronger negative guidance.
+- `nag_sigma_end`: NAG will be active only until `nag_sigma_end`.
 
 ### Rule of Thumb
 
