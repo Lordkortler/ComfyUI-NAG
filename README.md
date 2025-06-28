@@ -14,7 +14,7 @@ LTX Video Demo: https://huggingface.co/spaces/ChenDY/NAG_ltx-video-distilled
 
 Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
-![comfyui-nag](workflow.png)
+![comfyui-nag](workflow.png?cache=20250628)
 
 ## News
 
