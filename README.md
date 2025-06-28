@@ -14,6 +14,8 @@ LTX Video Demo: https://huggingface.co/spaces/ChenDY/NAG_ltx-video-distilled
 
 Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
+![comfyui-nag](workflow.png)
+
 ## News
 
 2025-06-28: `Flux Kontext` is now supported. Check out the [workflow](https://github.com/ChenDarYen/ComfyUI-NAG/blob/main/workflows/NAG-Flux-Kontext-Dev-ComfyUI-Workflow.json)!
@@ -34,8 +36,6 @@ To use NAG, simply replace the `CFGGuider` node with `NAGCFGGuider`, or the `KSa
 We currently support `Flux`, `Flux Kontext`, `Wan`, `Vace Wan`, `Hunyuan Video`, `Choroma`, `SD3.5`, `SDXL` and `SD`.
 
 Example workflows are available in the `./workflows` directory!
-
-![comfyui-nag](workflow.png)
 
 ## Key Inputs
 
