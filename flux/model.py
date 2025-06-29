@@ -141,14 +141,13 @@ class NAGFlux(Flux):
             control=None,
             transformer_options={},
 
-            positive_context=None,
             nag_negative_context=None,
             nag_negative_y=None,
             nag_sigma_end=0.,
 
             **kwargs,
     ):
-        apply_nag = check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end)
+        apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
@@ -217,14 +216,12 @@ class NAGFlux(Flux):
 
 def set_nag_flux(
         model: Flux,
-        positive_context,
         nag_negative_cond,
         nag_scale, nag_tau, nag_alpha, nag_sigma_end,
 ):
     model.forward = MethodType(
         partial(
             NAGFlux.forward,
-            positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
             nag_sigma_end=nag_sigma_end,

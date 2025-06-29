@@ -162,14 +162,13 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             control=None,
             transformer_options={},
 
-            positive_context=None,
             nag_negative_context=None,
             nag_negative_y=None,
             nag_sigma_end=0.,
 
             **kwargs,
     ) -> torch.Tensor:
-        apply_nag = check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end)
+        apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             context = cat_context(context, nag_negative_context)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
@@ -216,7 +215,6 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
 
 def set_nag_sd3(
         model: OpenAISignatureMMDITWrapper,
-        positive_context,
         nag_negative_cond,
         nag_scale, nag_tau, nag_alpha, nag_sigma_end,
 ):
@@ -226,7 +224,6 @@ def set_nag_sd3(
     model.forward = MethodType(
         partial(
             NAGOpenAISignatureMMDITWrapper.forward,
-            positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
             nag_sigma_end=nag_sigma_end,

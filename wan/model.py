@@ -220,13 +220,12 @@ class NAGWanModel(WanModel):
             time_dim_concat=None,
             transformer_options={},
 
-            positive_context=None,
             nag_negative_context=None,
             nag_sigma_end=0.,
 
             **kwargs,
     ):
-        apply_nag = check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end)
+        apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
@@ -359,13 +358,12 @@ class NAGVaceWanModel(VaceWanModel):
             time_dim_concat=None,
             transformer_options={},
 
-            positive_context=None,
             nag_negative_context=None,
             nag_sigma_end=0.,
 
             **kwargs,
     ):
-        apply_nag = check_nag_activation(context, transformer_options, positive_context, nag_negative_context, nag_sigma_end)
+        apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             origin_context_len = context.shape[1]
             context = cat_context(context, nag_negative_context, trim_context=True)
@@ -418,7 +416,6 @@ class NAGVaceWanModel(VaceWanModel):
 
 def set_nag_wan(
         model: WanModel,
-        positive_context,
         nag_negative_cond,
         nag_scale, nag_tau, nag_alpha, nag_sigma_end,
 ):
@@ -426,7 +423,6 @@ def set_nag_wan(
     model.forward = MethodType(
         partial(
             nag_model_cls.forward,
-            positive_context=positive_context,
             nag_negative_context=nag_negative_cond[0][0],
             nag_sigma_end=nag_sigma_end,
         ),

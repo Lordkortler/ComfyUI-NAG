@@ -143,13 +143,11 @@ class NAGCFGGuider(CFGGuider):
                 raise ValueError(
                     f"Model type {model_type} is not support for NAGCFGGuider"
                 )
-            positive_context = self.conds["positive"][0]["cross_attn"] if "negative" in self.conds else None
             self.nag_negative_cond[0][0] = self.nag_negative_cond[0][0].expand(self.batch_size, -1, -1)
             if self.nag_negative_cond[0][1].get("pooled_output", None) is not None:
                 self.nag_negative_cond[0][1]["pooled_output"] = self.nag_negative_cond[0][1]["pooled_output"].expand(self.batch_size, -1)
             set_fn(
                 model,
-                positive_context.expand(self.batch_size, -1, -1),
                 self.nag_negative_cond,
                 self.nag_scale, self.nag_tau, self.nag_alpha, self.nag_sigma_end,
             )
