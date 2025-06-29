@@ -7,6 +7,11 @@ import math
 if TYPE_CHECKING:
     from comfy.model_patcher import ModelPatcher
 import torch
+from torch._dynamo.eval_frame import OptimizedModule
+import torch._dynamo
+
+torch._dynamo.config.suppress_errors = True
+
 from comfy.samplers import (
     process_conds,
     preprocess_conds_hooks,
@@ -113,6 +118,8 @@ class NAGCFGGuider(CFGGuider):
             self.nag_negative_cond = copy.deepcopy(self.origin_nag_negative_cond)
 
             model = self.model_patcher.model.diffusion_model
+            if isinstance(model, OptimizedModule):
+                model = model._orig_mod
             model_type = type(model)
             if model_type == Flux:
                 set_fn = set_nag_flux
