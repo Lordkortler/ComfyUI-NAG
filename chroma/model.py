@@ -101,6 +101,7 @@ class NAGChroma(Chroma):
                         if add is not None:
                             img += add
 
+        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
         img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((txt, img), 1)
 

@@ -28,8 +28,8 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             pe: Tensor,
             vec: Tensor,
             attn_mask=None,
-            context_pad_len: int = None,
-            nag_pad_len: int = None,
+            context_pad_len: int = 0,
+            nag_pad_len: int = 0,
     ):
         origin_bsz = len(txt) - len(img)
         assert origin_bsz != 0
@@ -58,8 +58,11 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
         img_k_negative = img_k[-origin_bsz:]
         img_v_negative = img_v[-origin_bsz:]
 
-        pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
-        pe = pe[:, :, context_pad_len:]
+        pe_negative = pe[-origin_bsz:]
+        if nag_pad_len > 0:
+            pe_negative = pe_negative[:, :, :-nag_pad_len]
+        if context_pad_len > 0:
+            pe = pe[:, :, :-context_pad_len]
 
         # run actual attention
         attn_negative = attention(
@@ -125,8 +128,8 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             attn_mask=None,
             txt_length:int = None,
             origin_bsz: int = None,
-            context_pad_len: int = None,
-            nag_pad_len: int = None,
+            context_pad_len: int = 0,
+            nag_pad_len: int = 0,
     ) -> Tensor:
         mod = vec
         x_mod = torch.addcmul(mod.shift, 1 + mod.scale, self.pre_norm(x))
@@ -140,8 +143,12 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         k, k_negative = k[:-origin_bsz, :, context_pad_len:], k[-origin_bsz:, :, nag_pad_len:]
         v, v_negative = v[:-origin_bsz, :, context_pad_len:], v[-origin_bsz:, :, nag_pad_len:]
 
-        pe_negative = pe[-origin_bsz:, :, nag_pad_len:]
-        pe = pe[:, :, context_pad_len:]
+        pe_negative = pe[-origin_bsz:]
+        pe = pe[:-origin_bsz]
+        if nag_pad_len > 0:
+            pe_negative = pe_negative[:, :, :-nag_pad_len]
+        if context_pad_len > 0:
+            pe = pe[:, :, :-context_pad_len]
 
         attn_negative = attention(q_negative, k_negative, v_negative, pe=pe_negative, mask=attn_mask)
         attn = attention(q, k, v, pe=pe, mask=attn_mask)

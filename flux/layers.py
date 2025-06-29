@@ -30,8 +30,8 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             attn_mask=None,
             modulation_dims_img=None,
             modulation_dims_txt=None,
-            context_pad_len: int = None,
-            nag_pad_len: int = None,
+            context_pad_len: int = 0,
+            nag_pad_len: int = 0,
     ):
         origin_bsz = len(txt) - len(img)
         assert origin_bsz != 0
@@ -84,7 +84,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
                 pe=pe, mask=attn_mask,
             )
 
-            img_attn_negative, txt_attn_negative = attn_negative[:, : img.shape[1]], attn_negative[:, img.shape[1]:]
+            img_attn_negative, txt_attn_negative = attn_negative[:, :img.shape[1]], attn_negative[:, img.shape[1]:]
             img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1]:]
         else:
             # run actual attention
@@ -117,8 +117,8 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             img_mod2.gate, None, modulation_dims_img)
 
         # calculate the txt bloks
-        txt[:-origin_bsz, context_pad_len:] += apply_mod(self.txt_attn.proj(txt_attn), txt_mod1.gate[:-origin_bsz], None, modulation_dims_txt)
-        txt[-origin_bsz:, nag_pad_len:] += apply_mod(self.txt_attn.proj(txt_attn_negative), txt_mod1.gate[-origin_bsz:], None, modulation_dims_txt)
+        txt[:-origin_bsz, context_pad_len:].addcmul_(txt_mod1.gate[:-origin_bsz], self.txt_attn.proj(txt_attn))
+        txt[-origin_bsz:, nag_pad_len:].addcmul_(txt_mod1.gate[-origin_bsz:], self.txt_attn.proj(txt_attn_negative))
         txt += apply_mod(
             self.txt_mlp(apply_mod(self.txt_norm2(txt), (1 + txt_mod2.scale), txt_mod2.shift, modulation_dims_txt)),
             txt_mod2.gate, None, modulation_dims_txt)
@@ -154,8 +154,8 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             txt_length: int = None,
             img_length: int = None,
             origin_bsz: int = None,
-            context_pad_len: int = None,
-            nag_pad_len: int = None,
+            context_pad_len: int = 0,
+            nag_pad_len: int = 0,
     ) -> Tensor:
         mod= self.modulation(vec)[0]
         qkv, mlp = torch.split(self.linear1(apply_mod(self.pre_norm(x), (1 + mod.scale), mod.shift, modulation_dims)), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
