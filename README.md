@@ -18,7 +18,7 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## News
 
-2025-06-30: Fix a major bug that affects `Flux`, `Flux Kontext` and `Chroma`. Please update your NAG node!
+2025-06-30: Fix a major bug affecting `Flux`, `Flux Kontext` and `Chroma`, resulting in degraded guidance. Please update your NAG node!
 
 2025-06-29: Add compile model support. You can now use compile model nodes like `TorchCompileModel` to speed up NAG sampling!
 
