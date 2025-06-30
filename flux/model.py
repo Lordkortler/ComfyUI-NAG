@@ -94,10 +94,8 @@ class NAGFlux(Flux):
         if img.dtype == torch.float16:
             img = torch.nan_to_num(img, nan=0.0, posinf=65504, neginf=-65504)
 
-        # pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
-        # img = torch.cat((img, img[-origin_bsz:]), dim=0)
-        txt = txt[:-origin_bsz]
-        vec = vec[:-origin_bsz]
+        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
+        img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((txt, img), 1)
 
         for i, block in enumerate(self.single_blocks):
@@ -126,10 +124,10 @@ class NAGFlux(Flux):
                     if add is not None:
                         img[:, txt.shape[1] :, ...] += add
 
-        # img = img[:-origin_bsz]
+        img = img[:-origin_bsz]
         img = img[:, txt.shape[1] :, ...]
 
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+        img = self.final_layer(img, vec[:-origin_bsz])  # (N, T, patch_size ** 2 * out_channels)
         return img
 
     def forward(
@@ -167,17 +165,17 @@ class NAGFlux(Flux):
                     ),
                     block,
                 )
-            # for block in self.single_blocks:
-            #     block.forward = MethodType(
-            #         partial(
-            #             NAGSingleStreamBlock.forward,
-            #             txt_length=context.shape[1],
-            #             origin_bsz=nag_negative_context.shape[0],
-            #             context_pad_len=context_pad_len,
-            #             nag_pad_len=nag_pad_len,
-            #         ),
-            #         block,
-            #     )
+            for block in self.single_blocks:
+                block.forward = MethodType(
+                    partial(
+                        NAGSingleStreamBlock.forward,
+                        txt_length=context.shape[1],
+                        origin_bsz=nag_negative_context.shape[0],
+                        context_pad_len=context_pad_len,
+                        nag_pad_len=nag_pad_len,
+                    ),
+                    block,
+                )
         else:
             self.forward_orig = MethodType(Flux.forward_orig, self)
             for block in self.double_blocks:
