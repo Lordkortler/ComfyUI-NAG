@@ -15,7 +15,7 @@ from comfy.ldm.wan.model import (
     sinusoidal_embedding_1d,
 )
 
-from ..utils import nag, cat_context, check_nag_activation
+from ..utils import nag, cat_context, check_nag_activation, poly1d
 
 
 class NAGWanT2VCrossAttention(WanT2VCrossAttention):
@@ -211,6 +211,142 @@ class NAGWanModel(WanModel):
         x = self.unpatchify(x, grid_sizes)
         return x
 
+    def forward_orig_with_teacache(
+            self,
+            x,
+            t,
+            context,
+            clip_fea=None,
+            freqs=None,
+            transformer_options={},
+            **kwargs,
+    ):
+        r"""
+        Forward pass through the diffusion model
+
+        Args:
+            x (Tensor):
+                List of input video tensors with shape [B, C_in, F, H, W]
+            t (Tensor):
+                Diffusion timesteps tensor of shape [B]
+            context (List[Tensor]):
+                List of text embeddings each with shape [B, L, C]
+            seq_len (`int`):
+                Maximum sequence length for positional encoding
+            clip_fea (Tensor, *optional*):
+                CLIP image features for image-to-video mode
+            y (List[Tensor], *optional*):
+                Conditional video inputs for image-to-video mode, same shape as x
+
+        Returns:
+            List[Tensor]:
+                List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
+        """
+        enable_teacache = transformer_options.get("enable_teacache", True)
+        rel_l1_thresh = transformer_options.get("rel_l1_thresh")
+        coefficients = transformer_options.get("coefficients")
+        cond_or_uncond = transformer_options.get("cond_or_uncond")
+        model_type = transformer_options.get("model_type")
+        cache_device = transformer_options.get("cache_device")
+
+        # embeddings
+        x = self.patch_embedding(x.float()).to(x.dtype)
+        grid_sizes = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+
+        # time embeddings
+        e = self.time_embedding(
+            sinusoidal_embedding_1d(self.freq_dim, t).to(dtype=x[0].dtype))
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim))
+
+        # context
+        context = self.text_embedding(context)
+
+        context_img_len = None
+        if clip_fea is not None:
+            if self.img_emb is not None:
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = torch.cat([context_clip, context_clip[-context.shape[0] - context_clip.shape[0]:]])
+                context = torch.concat([context_clip, context], dim=1)
+            context_img_len = clip_fea.shape[-2]
+
+        patches_replace = transformer_options.get("patches_replace", {})
+        blocks_replace = patches_replace.get("dit", {})
+
+        if enable_teacache:
+            modulated_inp = e0.to(cache_device) if "ret_mode" in model_type else e.to(cache_device)
+            if not hasattr(self, 'teacache_state'):
+                self.teacache_state = {
+                    0: {'should_calc': True, 'accumulated_rel_l1_distance': 0, 'previous_modulated_input': None,
+                        'previous_residual': None},
+                    1: {'should_calc': True, 'accumulated_rel_l1_distance': 0, 'previous_modulated_input': None,
+                        'previous_residual': None}
+                }
+
+            def update_cache_state(cache, modulated_inp):
+                if cache['previous_modulated_input'] is not None:
+                    try:
+                        cache['accumulated_rel_l1_distance'] += poly1d(coefficients, (
+                                    (modulated_inp - cache['previous_modulated_input']).abs().mean() / cache[
+                                'previous_modulated_input'].abs().mean()))
+                        if cache['accumulated_rel_l1_distance'] < rel_l1_thresh:
+                            cache['should_calc'] = False
+                        else:
+                            cache['should_calc'] = True
+                            cache['accumulated_rel_l1_distance'] = 0
+                    except:
+                        cache['should_calc'] = True
+                        cache['accumulated_rel_l1_distance'] = 0
+                cache['previous_modulated_input'] = modulated_inp
+
+            b = int(len(x) / len(cond_or_uncond))
+
+            for i, k in enumerate(cond_or_uncond):
+                update_cache_state(self.teacache_state[k], modulated_inp[i * b:(i + 1) * b])
+
+            if enable_teacache:
+                should_calc = False
+                for k in cond_or_uncond:
+                    should_calc = (should_calc or self.teacache_state[k]['should_calc'])
+            else:
+                should_calc = True
+
+            if should_calc:
+                ori_x = x.to(cache_device)
+
+        else:
+            should_calc = False
+
+        if should_calc:
+            for i, block in enumerate(self.blocks):
+                if ("double_block", i) in blocks_replace:
+                    def block_wrap(args):
+                        out = {}
+                        out["img"] = block(args["img"], context=args["txt"], e=args["vec"], freqs=args["pe"],
+                                           context_img_len=context_img_len)
+                        return out
+
+                    out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": e0, "pe": freqs},
+                                                              {"original_block": block_wrap})
+                    x = out["img"]
+                else:
+                    x = block(x, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
+
+        else:
+            for i, k in enumerate(cond_or_uncond):
+                x[i * b:(i + 1) * b] += self.teacache_state[k]['previous_residual'].to(x.device)
+
+        if enable_teacache and should_calc:
+            for i, k in enumerate(cond_or_uncond):
+                self.teacache_state[k]['previous_residual'] = (x.to(cache_device) - ori_x)[i*b:(i+1)*b]
+
+        # head
+        x = self.head(x, e)
+
+        # unpatchify
+        x = self.unpatchify(x, grid_sizes)
+        return x
+
     def forward(
             self,
             x,
@@ -232,7 +368,12 @@ class NAGWanModel(WanModel):
             context_pad_len = context.shape[1] - origin_context_len
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
-            self.forward_orig = MethodType(NAGWanModel.forward_orig, self)
+            forward_orig_ = self.forward_orig
+            if transformer_options.get("enable_teacache", False):
+                self.forward_orig = MethodType(NAGWanModel.forward_orig_with_teacache, self)
+            else:
+                self.forward_orig = MethodType(NAGWanModel.forward_orig, self)
+
             cross_attn_cls = NAGWanT2VCrossAttention if self.model_type == "t2v" else NAGWanI2VCrossAttention
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
@@ -244,8 +385,8 @@ class NAGWanModel(WanModel):
                         ),
                         module,
                     )
+
         else:
-            self.forward_orig = MethodType(WanModel.forward_orig, self)
             cross_attn_cls = WanT2VCrossAttention if self.model_type == "t2v" else WanI2VCrossAttention
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
@@ -274,8 +415,14 @@ class NAGWanModel(WanModel):
         img_ids = repeat(img_ids, "t h w c -> b (t h w) c", b=bs)
 
         freqs = self.rope_embedder(img_ids).movedim(1, 2)
-        return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs,
-                                 transformer_options=transformer_options, **kwargs)[:, :, :t, :h, :w]
+        output = self.forward_orig(
+            x, timestep, context, clip_fea=clip_fea, freqs=freqs,
+            transformer_options=transformer_options, **kwargs)[:, :, :t, :h, :w]
+
+        if apply_nag:
+            self.forward_orig = forward_orig_
+
+        return output
 
 
 class NAGVaceWanModel(VaceWanModel):
@@ -349,6 +496,137 @@ class NAGVaceWanModel(VaceWanModel):
         x = self.unpatchify(x, grid_sizes)
         return x
 
+    def forward_orig_with_teacache(
+        self,
+        x,
+        t,
+        context,
+        vace_context,
+        vace_strength,
+        clip_fea=None,
+        freqs=None,
+        transformer_options={},
+        **kwargs,
+    ):
+        enable_teacache = transformer_options.get("enable_teacache", True)
+        rel_l1_thresh = transformer_options.get("rel_l1_thresh")
+        coefficients = transformer_options.get("coefficients")
+        cond_or_uncond = transformer_options.get("cond_or_uncond")
+        model_type = transformer_options.get("model_type")
+        cache_device = transformer_options.get("cache_device")
+
+        origin_batch_size = context.shape[0] - x.shape[0]
+
+        # embeddings
+        x = self.patch_embedding(x.float()).to(x.dtype)
+        grid_sizes = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+
+        # time embeddings
+        e = self.time_embedding(
+            sinusoidal_embedding_1d(self.freq_dim, t).to(dtype=x[0].dtype))
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim))
+
+        # context
+        context = self.text_embedding(context)
+
+        context_img_len = None
+        if clip_fea is not None:
+            if self.img_emb is not None:
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context_clip = torch.cat([context_clip, context_clip[-origin_batch_size:]])
+                context = torch.concat([context_clip, context], dim=1)
+            context_img_len = clip_fea.shape[-2]
+
+        orig_shape = list(vace_context.shape)
+        vace_context = vace_context.movedim(0, 1).reshape([-1] + orig_shape[2:])
+        c = self.vace_patch_embedding(vace_context.float()).to(vace_context.dtype)
+        c = c.flatten(2).transpose(1, 2)
+        c = list(c.split(orig_shape[0], dim=0))
+
+        # arguments
+        x_orig = x
+
+        patches_replace = transformer_options.get("patches_replace", {})
+        blocks_replace = patches_replace.get("dit", {})
+
+        if enable_teacache:
+            modulated_inp = e0.to(cache_device) if "ret_mode" in model_type else e.to(cache_device)
+            if not hasattr(self, 'teacache_state'):
+                self.teacache_state = {
+                    0: {'should_calc': True, 'accumulated_rel_l1_distance': 0, 'previous_modulated_input': None,
+                        'previous_residual': None},
+                    1: {'should_calc': True, 'accumulated_rel_l1_distance': 0, 'previous_modulated_input': None,
+                        'previous_residual': None}
+                }
+
+            def update_cache_state(cache, modulated_inp):
+                if cache['previous_modulated_input'] is not None:
+                    try:
+                        cache['accumulated_rel_l1_distance'] += poly1d(coefficients, (
+                                    (modulated_inp - cache['previous_modulated_input']).abs().mean() / cache[
+                                'previous_modulated_input'].abs().mean()))
+                        if cache['accumulated_rel_l1_distance'] < rel_l1_thresh:
+                            cache['should_calc'] = False
+                        else:
+                            cache['should_calc'] = True
+                            cache['accumulated_rel_l1_distance'] = 0
+                    except:
+                        cache['should_calc'] = True
+                        cache['accumulated_rel_l1_distance'] = 0
+                cache['previous_modulated_input'] = modulated_inp
+
+            b = int(len(x) / len(cond_or_uncond))
+
+            for i, k in enumerate(cond_or_uncond):
+                update_cache_state(self.teacache_state[k], modulated_inp[i * b:(i + 1) * b])
+
+            if enable_teacache:
+                should_calc = False
+                for k in cond_or_uncond:
+                    should_calc = (should_calc or self.teacache_state[k]['should_calc'])
+            else:
+                should_calc = True
+
+            if should_calc:
+                ori_x = x.to(cache_device)
+
+        else:
+            should_calc = False
+
+        if should_calc:
+            for i, block in enumerate(self.blocks):
+                if ("double_block", i) in blocks_replace:
+                    def block_wrap(args):
+                        out = {}
+                        out["img"] = block(args["img"], context=args["txt"], e=args["vec"], freqs=args["pe"], context_img_len=context_img_len)
+                        return out
+                    out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": e0, "pe": freqs}, {"original_block": block_wrap})
+                    x = out["img"]
+                else:
+                    x = block(x, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
+
+                ii = self.vace_layers_mapping.get(i, None)
+                if ii is not None:
+                    for iii in range(len(c)):
+                        c_skip, c[iii] = self.vace_blocks[ii](c[iii], x=x_orig, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
+                        x += c_skip * vace_strength[iii]
+                    del c_skip
+        else:
+            for i, k in enumerate(cond_or_uncond):
+                x[i * b:(i + 1) * b] += self.teacache_state[k]['previous_residual'].to(x.device)
+
+        if enable_teacache and should_calc:
+            for i, k in enumerate(cond_or_uncond):
+                self.teacache_state[k]['previous_residual'] = (x.to(cache_device) - ori_x)[i * b:(i + 1) * b]
+
+        # head
+        x = self.head(x, e)
+
+        # unpatchify
+        x = self.unpatchify(x, grid_sizes)
+        return x
+
     def forward(
             self,
             x,
@@ -370,7 +648,11 @@ class NAGVaceWanModel(VaceWanModel):
             context_pad_len = context.shape[1] - origin_context_len
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
-            self.forward_orig = MethodType(NAGVaceWanModel.forward_orig, self)
+            forward_orig_ = self.forward_orig
+            if transformer_options.get("enable_teacache", False):
+                self.forward_orig = MethodType(NAGVaceWanModel.forward_orig_with_teacache, self)
+            else:
+                self.forward_orig = MethodType(NAGVaceWanModel.forward_orig, self)
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
                     module.forward = MethodType(
@@ -381,8 +663,8 @@ class NAGVaceWanModel(VaceWanModel):
                         ),
                         module,
                     )
+
         else:
-            self.forward_orig = MethodType(VaceWanModel.forward_orig, self)
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
                     module.forward = MethodType(WanT2VCrossAttention.forward, module)
@@ -410,8 +692,13 @@ class NAGVaceWanModel(VaceWanModel):
         img_ids = repeat(img_ids, "t h w c -> b (t h w) c", b=bs)
 
         freqs = self.rope_embedder(img_ids).movedim(1, 2)
-        return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs,
+        output = self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs,
                                  transformer_options=transformer_options, **kwargs)[:, :, :t, :h, :w]
+
+        if apply_nag:
+            self.forward_orig = forward_orig_
+
+        return output
 
 
 def set_nag_wan(
@@ -437,7 +724,6 @@ def set_nag_wan(
 
 def set_origin_wan(model: NAGWanModel):
     origin_model_cls = VaceWanModel if isinstance(model, VaceWanModel) else WanModel
-    model.forward_orig = MethodType(origin_model_cls.forward_orig, model)
     model.forward = MethodType(origin_model_cls.forward, model)
     cross_attn_cls = WanT2VCrossAttention if model.model_type == "t2v" else WanI2VCrossAttention
     for name, module in model.named_modules():

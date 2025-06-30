@@ -37,3 +37,10 @@ def check_nag_activation(transformer_options, nag_sigma_end):
     apply_nag = torch.all(transformer_options["sigmas"] >= nag_sigma_end)
     positive_batch = 0 in transformer_options["cond_or_uncond"]
     return apply_nag and positive_batch
+
+
+def poly1d(coefficients, x):
+    result = torch.zeros_like(x)
+    for i, coeff in enumerate(coefficients):
+        result += coeff * (x ** (len(coefficients) - 1 - i))
+    return result
