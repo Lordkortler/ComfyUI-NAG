@@ -369,6 +369,8 @@ class NAGWanModel(WanModel):
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
             forward_orig_ = self.forward_orig
+            cross_attns_forward = list()
+
             if transformer_options.get("enable_teacache", False):
                 self.forward_orig = MethodType(NAGWanModel.forward_orig_with_teacache, self)
             else:
@@ -377,6 +379,7 @@ class NAGWanModel(WanModel):
             cross_attn_cls = NAGWanT2VCrossAttention if self.model_type == "t2v" else NAGWanI2VCrossAttention
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
+                    cross_attns_forward.append((module, module.forward))
                     module.forward = MethodType(
                         partial(
                             cross_attn_cls.forward,
@@ -385,12 +388,6 @@ class NAGWanModel(WanModel):
                         ),
                         module,
                     )
-
-        else:
-            cross_attn_cls = WanT2VCrossAttention if self.model_type == "t2v" else WanI2VCrossAttention
-            for name, module in self.named_modules():
-                if "cross_attn" in name and isinstance(module, WanSelfAttention):
-                    module.forward = MethodType(cross_attn_cls.forward, module)
 
         bs, c, t, h, w = x.shape
         x = comfy.ldm.common_dit.pad_to_patch_size(x, self.patch_size)
@@ -421,6 +418,8 @@ class NAGWanModel(WanModel):
 
         if apply_nag:
             self.forward_orig = forward_orig_
+            for mod, forward_fn in cross_attns_forward:
+                mod.forward = forward_fn
 
         return output
 
@@ -649,12 +648,15 @@ class NAGVaceWanModel(VaceWanModel):
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
             forward_orig_ = self.forward_orig
+            cross_attns_forward = list()
+
             if transformer_options.get("enable_teacache", False):
                 self.forward_orig = MethodType(NAGVaceWanModel.forward_orig_with_teacache, self)
             else:
                 self.forward_orig = MethodType(NAGVaceWanModel.forward_orig, self)
             for name, module in self.named_modules():
                 if "cross_attn" in name and isinstance(module, WanSelfAttention):
+                    cross_attns_forward.append((module, module.forward))
                     module.forward = MethodType(
                         partial(
                             NAGWanT2VCrossAttention.forward,
@@ -663,11 +665,6 @@ class NAGVaceWanModel(VaceWanModel):
                         ),
                         module,
                     )
-
-        else:
-            for name, module in self.named_modules():
-                if "cross_attn" in name and isinstance(module, WanSelfAttention):
-                    module.forward = MethodType(WanT2VCrossAttention.forward, module)
 
         bs, c, t, h, w = x.shape
         x = comfy.ldm.common_dit.pad_to_patch_size(x, self.patch_size)
@@ -697,6 +694,8 @@ class NAGVaceWanModel(VaceWanModel):
 
         if apply_nag:
             self.forward_orig = forward_orig_
+            for mod, forward_fn in cross_attns_forward:
+                mod.forward = forward_fn
 
         return output
 
@@ -725,7 +724,3 @@ def set_nag_wan(
 def set_origin_wan(model: NAGWanModel):
     origin_model_cls = VaceWanModel if isinstance(model, VaceWanModel) else WanModel
     model.forward = MethodType(origin_model_cls.forward, model)
-    cross_attn_cls = WanT2VCrossAttention if model.model_type == "t2v" else WanI2VCrossAttention
-    for name, module in model.named_modules():
-        if "cross_attn" in name and isinstance(module, WanSelfAttention):
-            module.forward = MethodType(cross_attn_cls.forward, module)

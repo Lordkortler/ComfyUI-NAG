@@ -28,20 +28,24 @@ class NAGUnetModel(UNetModel):
         apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             context = cat_context(context, nag_negative_context)
+            cross_attns_forward = list()
             for name, module in self.named_modules():
                 if "attn2" in name and isinstance(module, CrossAttention):
+                    cross_attns_forward.append((module, module.forward))
                     module.forward = MethodType(NAGCrossAttention.forward, module)
-        else:
-            for name, module in self.named_modules():
-                if "attn2" in name and isinstance(module, CrossAttention):
-                    module.forward = MethodType(CrossAttention.forward, module)
 
-        return comfy.patcher_extension.WrapperExecutor.new_class_executor(
+        output = comfy.patcher_extension.WrapperExecutor.new_class_executor(
             self._forward,
             self,
             comfy.patcher_extension.get_all_wrappers(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
                                                      transformer_options)
         ).execute(x, timesteps, context, y, control, transformer_options, **kwargs)
+
+        if apply_nag:
+            for mod, forward_fn in cross_attns_forward:
+                mod.forward = forward_fn
+
+        return output
 
 
 def set_nag_sd(
@@ -66,6 +70,3 @@ def set_nag_sd(
 
 def set_origin_sd(model: NAGUnetModel):
     model.forward = MethodType(UNetModel.forward, model)
-    for name, module in model.named_modules():
-        if "attn2" in name and isinstance(module, CrossAttention):
-            module.forward = MethodType(CrossAttention.forward, module)

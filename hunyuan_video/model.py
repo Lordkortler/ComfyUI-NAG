@@ -433,11 +433,15 @@ class NAGHunyuanVideo(HunyuanVideo):
             nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
 
             forward_orig_ = self.forward_orig
+            double_blocks_forward = list()
+            single_blocks_forward = list()
+
             if transformer_options.get("enable_teacache", False):
                 self.forward_orig = MethodType(NAGHunyuanVideo.forward_orig_with_teacache, self)
             else:
                 self.forward_orig = MethodType(NAGHunyuanVideo.forward_orig, self)
             for block in self.double_blocks:
+                double_blocks_forward.append(block.forward)
                 block.forward = MethodType(
                     partial(
                         NAGDoubleStreamBlock.forward,
@@ -448,6 +452,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                 )
 
             for block in self.single_blocks:
+                single_blocks_forward.append(block.forward)
                 block.forward = MethodType(
                     partial(
                         NAGSingleStreamBlock.forward,
@@ -467,13 +472,12 @@ class NAGHunyuanVideo(HunyuanVideo):
             )
 
             self.forward_orig = forward_orig_
+            for block in self.double_blocks:
+                block.forward = double_blocks_forward.pop(0)
+            for block in self.single_blocks:
+                block.forward = single_blocks_forward.pop(0)
 
         else:
-            for block in self.double_blocks:
-                block.forward = MethodType(DoubleStreamBlock.forward, block)
-            for block in self.single_blocks:
-                block.forward = MethodType(SingleStreamBlock.forward, block)
-
             txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
             out = self.forward_orig(
                 x, img_ids, context, txt_ids, attention_mask, timestep, y, guidance,
@@ -510,8 +514,4 @@ def set_nag_hunyuan_video(
 
 def set_origin_hunyuan_video(model: NAGHunyuanVideo):
     model.forward = MethodType(HunyuanVideo.forward, model)
-    for block in model.double_blocks:
-        block.forward = MethodType(DoubleStreamBlock.forward, block)
-    for block in model.single_blocks:
-        block.forward = MethodType(SingleStreamBlock.forward, block)
 

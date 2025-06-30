@@ -173,8 +173,12 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             context = cat_context(context, nag_negative_context)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
 
+            forward_core_with_concat_ = self.forward_core_with_concat
+            joint_blocks_forward = list()
+
             self.forward_core_with_concat = MethodType(NAGOpenAISignatureMMDITWrapper.forward_core_with_concat, self)
             for block in self.joint_blocks:
+                joint_blocks_forward.append(block.forward)
                 block.forward = MethodType(
                     partial(
                         NAGJointBlock.forward,
@@ -184,10 +188,6 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
                     ),
                     block,
                 )
-        else:
-            self.forward_core_with_concat = MethodType(OpenAISignatureMMDITWrapper.forward_core_with_concat, self)
-            for block in self.joint_blocks:
-                block.forward = MethodType(JointBlock.forward, block)
 
         if self.context_processor is not None:
             context = self.context_processor(context)
@@ -208,6 +208,11 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             context = self.context_embedder(context)
 
         x = self.forward_core_with_concat(x, c, context, control, transformer_options)
+
+        if apply_nag:
+            self.forward_core_with_concat = forward_core_with_concat_
+            for block in self.joint_blocks:
+                block.forward = joint_blocks_forward.pop(0)
 
         x = self.unpatchify(x, hw=hw)  # (N, out_channels, H, W)
         return x[:, :, :hw[-2], :hw[-1]]
@@ -234,6 +239,3 @@ def set_nag_sd3(
 
 def set_origin_sd3(model: NAGOpenAISignatureMMDITWrapper):
     model.forward = MethodType(OpenAISignatureMMDITWrapper.forward, model)
-    model.forward_core_with_concat = MethodType(OpenAISignatureMMDITWrapper.forward_core_with_concat, model)
-    for block in model.joint_blocks:
-        block.forward = MethodType(JointBlock.forward, block)
