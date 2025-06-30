@@ -27,6 +27,7 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             txt: Tensor,
             vec: Tensor,
             pe: Tensor,
+            pe_negative: Tensor,
             attn_mask=None,
             modulation_dims_img=None,
             modulation_dims_txt=None,
@@ -62,12 +63,6 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
         img_q_negative = img_q[-origin_bsz:]
         img_k_negative = img_k[-origin_bsz:]
         img_v_negative = img_v[-origin_bsz:]
-
-        pe_negative = pe[-origin_bsz:]
-        if nag_pad_len > 0:
-            pe_negative = pe_negative[:, :, :-nag_pad_len]
-        if context_pad_len > 0:
-            pe = pe[:, :, :-context_pad_len]
 
         if self.flipped_img_txt:
             # run actual attention
@@ -148,6 +143,7 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             x: Tensor,
             vec: Tensor,
             pe: Tensor,
+            pe_negative: Tensor,
             attn_mask=None,
             modulation_dims=None,
 
@@ -190,12 +186,6 @@ class NAGSingleStreamBlock(SingleStreamBlock):
         q_negative, q = remove_pad_and_get_neg(q)
         k_negative, k = remove_pad_and_get_neg(k)
         v_negative, v = remove_pad_and_get_neg(v)
-        pe_negative = pe[-origin_bsz:]
-        pe = pe[:-origin_bsz]
-        if nag_pad_len > 0:
-            pe_negative = pe_negative[:, :, :-nag_pad_len]
-        if context_pad_len > 0:
-            pe = pe[:, :, :-context_pad_len]
 
         # compute attention
         attn_negative = attention(q_negative, k_negative, v_negative, pe=pe_negative, mask=attn_mask)

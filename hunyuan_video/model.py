@@ -18,6 +18,7 @@ class NAGHunyuanVideo(HunyuanVideo):
         img_ids: Tensor,
         txt: Tensor,
         txt_ids: Tensor,
+        txt_ids_negative: Tensor,
         txt_mask: Tensor,
         timesteps: Tensor,
         y: Tensor,
@@ -68,7 +69,9 @@ class NAGHunyuanVideo(HunyuanVideo):
         txt = self.txt_in(txt, timesteps, txt_mask)
 
         ids = torch.cat((img_ids, txt_ids), dim=1)
+        ids_negative = torch.cat((img_ids[-origin_bsz:], txt_ids_negative), dim=1)
         pe = self.pe_embedder(ids)
+        pe_negative = self.pe_embedder(ids_negative)
 
         img_len = img.shape[1]
         if txt_mask is not None:
@@ -83,14 +86,41 @@ class NAGHunyuanVideo(HunyuanVideo):
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
                     out = {}
-                    out["img"], out["txt"] = block(img=args["img"], txt=args["txt"], vec=args["vec"], pe=args["pe"], attn_mask=args["attention_mask"], modulation_dims_img=args["modulation_dims_img"], modulation_dims_txt=args["modulation_dims_txt"])
+                    out["img"], out["txt"] = block(
+                        img=args["img"],
+                        txt=args["txt"],
+                        vec=args["vec"],
+                        pe=args["pe"],
+                        pe_negative=args["pe_negative"],
+                        attn_mask=args["attention_mask"],
+                        modulation_dims_img=args["modulation_dims_img"],
+                        modulation_dims_txt=args["modulation_dims_txt"],
+                    )
                     return out
 
-                out = blocks_replace[("double_block", i)]({"img": img, "txt": txt, "vec": vec, "pe": pe, "attention_mask": attn_mask, 'modulation_dims_img': modulation_dims, 'modulation_dims_txt': modulation_dims_txt}, {"original_block": block_wrap})
+                out = blocks_replace[("double_block", i)]({
+                    "img": img,
+                    "txt": txt,
+                    "vec": vec,
+                    "pe": pe,
+                    "pe_negative": pe_negative,
+                    "attention_mask": attn_mask,
+                    'modulation_dims_img': modulation_dims,
+                    'modulation_dims_txt': modulation_dims_txt,
+                }, {"original_block": block_wrap})
                 txt = out["txt"]
                 img = out["img"]
             else:
-                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, attn_mask=attn_mask, modulation_dims_img=modulation_dims, modulation_dims_txt=modulation_dims_txt)
+                img, txt = block(
+                    img=img,
+                    txt=txt,
+                    vec=vec,
+                    pe=pe,
+                    pe_negative=pe_negative,
+                    attn_mask=attn_mask,
+                    modulation_dims_img=modulation_dims,
+                    modulation_dims_txt=modulation_dims_txt,
+                )
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -99,7 +129,6 @@ class NAGHunyuanVideo(HunyuanVideo):
                     if add is not None:
                         img += add
 
-        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
         img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((img, txt), 1)
 
@@ -107,13 +136,34 @@ class NAGHunyuanVideo(HunyuanVideo):
             if ("single_block", i) in blocks_replace:
                 def block_wrap(args):
                     out = {}
-                    out["img"] = block(args["img"], vec=args["vec"], pe=args["pe"], attn_mask=args["attention_mask"], modulation_dims=args["modulation_dims"])
+                    out["img"] = block(
+                        args["img"],
+                        vec=args["vec"],
+                        pe=args["pe"],
+                        pe_negative=args["pe_negative"],
+                        attn_mask=args["attention_mask"],
+                        modulation_dims=args["modulation_dims"],
+                    )
                     return out
 
-                out = blocks_replace[("single_block", i)]({"img": img, "vec": vec, "pe": pe, "attention_mask": attn_mask, 'modulation_dims': modulation_dims}, {"original_block": block_wrap})
+                out = blocks_replace[("single_block", i)]({
+                    "img": img,
+                    "vec": vec,
+                    "pe": pe,
+                    "pe_negative": pe_negative,
+                    "attention_mask": attn_mask,
+                    'modulation_dims': modulation_dims,
+                }, {"original_block": block_wrap})
                 img = out["img"]
             else:
-                img = block(img, vec=vec, pe=pe, attn_mask=attn_mask, modulation_dims=modulation_dims)
+                img = block(
+                    img,
+                    vec=vec,
+                    pe=pe,
+                    pe_negative=pe_negative,
+                    attn_mask=attn_mask,
+                    modulation_dims=modulation_dims,
+                )
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -189,6 +239,14 @@ class NAGHunyuanVideo(HunyuanVideo):
                     ),
                     block,
                 )
+
+            txt_ids = torch.zeros((bs, origin_context_len, 3), device=x.device, dtype=x.dtype)
+            txt_ids_negative = torch.zeros((bs, nag_negative_context.shape[1], 3), device=x.device, dtype=x.dtype)
+            out = self.forward_orig(
+                x, img_ids, context, txt_ids, txt_ids_negative, attention_mask, timestep, y, guidance, guiding_frame_index, ref_latent,
+                control=control, transformer_options=transformer_options,
+            )
+
         else:
             self.forward_orig = MethodType(HunyuanVideo.forward_orig, self)
             for block in self.double_blocks:
@@ -196,10 +254,13 @@ class NAGHunyuanVideo(HunyuanVideo):
             for block in self.single_blocks:
                 block.forward = MethodType(SingleStreamBlock.forward, block)
 
-        txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
-        out = self.forward_orig(x, img_ids, context, txt_ids, attention_mask, timestep, y, guidance,
-                                guiding_frame_index, ref_latent, control=control,
-                                transformer_options=transformer_options)
+            txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
+            out = self.forward_orig(
+                x, img_ids, context, txt_ids, attention_mask, timestep, y, guidance,
+                guiding_frame_index, ref_latent,
+                control=control, transformer_options=transformer_options,
+            )
+
         return out
 
 

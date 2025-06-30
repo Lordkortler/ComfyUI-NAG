@@ -24,6 +24,7 @@ class NAGChroma(Chroma):
         img_ids: Tensor,
         txt: Tensor,
         txt_ids: Tensor,
+        txt_ids_negative: Tensor,
         timesteps: Tensor,
         guidance: Tensor = None,
         control = None,
@@ -60,7 +61,9 @@ class NAGChroma(Chroma):
         txt = self.txt_in(txt)
 
         ids = torch.cat((txt_ids, img_ids), dim=1)
+        ids_negative = torch.cat((txt_ids_negative, img_ids[-origin_bsz:]), dim=1)
         pe = self.pe_embedder(ids)
+        pe_negative = self.pe_embedder(ids_negative)
 
         blocks_replace = patches_replace.get("dit", {})
         for i, block in enumerate(self.double_blocks):
@@ -76,6 +79,7 @@ class NAGChroma(Chroma):
                                                        txt=args["txt"],
                                                        vec=args["vec"],
                                                        pe=args["pe"],
+                                                       pe_negative=args["pe_negative"],
                                                        attn_mask=args.get("attn_mask"))
                         return out
 
@@ -83,6 +87,7 @@ class NAGChroma(Chroma):
                                                                "txt": txt,
                                                                "vec": double_mod,
                                                                "pe": pe,
+                                                               "pe_negative": pe_negative,
                                                                "attn_mask": attn_mask},
                                                               {"original_block": block_wrap})
                     txt = out["txt"]
@@ -92,6 +97,7 @@ class NAGChroma(Chroma):
                                      txt=txt,
                                      vec=double_mod,
                                      pe=pe,
+                                     pe_negative=pe_negative,
                                      attn_mask=attn_mask)
 
                 if control is not None: # Controlnet
@@ -101,7 +107,6 @@ class NAGChroma(Chroma):
                         if add is not None:
                             img += add
 
-        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
         img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((txt, img), 1)
 
@@ -114,17 +119,19 @@ class NAGChroma(Chroma):
                         out["img"] = block(args["img"],
                                            vec=args["vec"],
                                            pe=args["pe"],
+                                           pe_negative=args["pe_negative"],
                                            attn_mask=args.get("attn_mask"))
                         return out
 
                     out = blocks_replace[("single_block", i)]({"img": img,
                                                                "vec": single_mod,
                                                                "pe": pe,
+                                                               "pe_negative": pe_negative,
                                                                "attn_mask": attn_mask},
                                                               {"original_block": block_wrap})
                     img = out["img"]
                 else:
-                    img = block(img, vec=single_mod, pe=pe, attn_mask=attn_mask)
+                    img = block(img, vec=single_mod, pe=pe, pe_negative=pe_negative, attn_mask=attn_mask)
 
                 if control is not None: # Controlnet
                     control_o = control.get("output")
@@ -153,6 +160,19 @@ class NAGChroma(Chroma):
 
             **kwargs,
     ):
+        bs, c, h, w = x.shape
+        patch_size = 2
+        x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
+
+        img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size)
+
+        h_len = ((h + (patch_size // 2)) // patch_size)
+        w_len = ((w + (patch_size // 2)) // patch_size)
+        img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
+        img_ids[:, :, 1] = img_ids[:, :, 1] + torch.linspace(0, h_len - 1, steps=h_len, device=x.device, dtype=x.dtype).unsqueeze(1)
+        img_ids[:, :, 2] = img_ids[:, :, 2] + torch.linspace(0, w_len - 1, steps=w_len, device=x.device, dtype=x.dtype).unsqueeze(0)
+        img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+
         apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             origin_context_len = context.shape[1]
@@ -181,6 +201,14 @@ class NAGChroma(Chroma):
                     ),
                     block,
                 )
+
+            txt_ids = torch.zeros((bs, origin_context_len, 3), device=x.device, dtype=x.dtype)
+            txt_ids_negative = torch.zeros((bs, nag_negative_context.shape[1], 3), device=x.device, dtype=x.dtype)
+            out = self.forward_orig(
+                img, img_ids, context, txt_ids, txt_ids_negative, timestep, guidance, control, transformer_options,
+                attn_mask=kwargs.get("attention_mask", None),
+            )
+
         else:
             self.forward_orig = MethodType(Chroma.forward_orig, self)
             for block in self.double_blocks:
@@ -188,21 +216,12 @@ class NAGChroma(Chroma):
             for block in self.single_blocks:
                 block.forward = MethodType(SingleStreamBlock.forward, block)
 
-        bs, c, h, w = x.shape
-        patch_size = 2
-        x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
+            txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
+            out = self.forward_orig(
+                img, img_ids, context, txt_ids, timestep, guidance, control, transformer_options,
+                attn_mask=kwargs.get("attention_mask", None),
+            )
 
-        img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size)
-
-        h_len = ((h + (patch_size // 2)) // patch_size)
-        w_len = ((w + (patch_size // 2)) // patch_size)
-        img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
-        img_ids[:, :, 1] = img_ids[:, :, 1] + torch.linspace(0, h_len - 1, steps=h_len, device=x.device, dtype=x.dtype).unsqueeze(1)
-        img_ids[:, :, 2] = img_ids[:, :, 2] + torch.linspace(0, w_len - 1, steps=w_len, device=x.device, dtype=x.dtype).unsqueeze(0)
-        img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
-
-        txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
-        out = self.forward_orig(img, img_ids, context, txt_ids, timestep, guidance, control, transformer_options, attn_mask=kwargs.get("attention_mask", None))
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
 
 

@@ -24,6 +24,7 @@ class NAGFlux(Flux):
         img_ids: Tensor,
         txt: Tensor,
         txt_ids: Tensor,
+        txt_ids_negative: Tensor,
         timesteps: Tensor,
         y: Tensor,
         guidance: Tensor = None,
@@ -53,9 +54,12 @@ class NAGFlux(Flux):
 
         if img_ids is not None:
             ids = torch.cat((txt_ids, img_ids), dim=1)
+            ids_negative = torch.cat((txt_ids_negative, img_ids[-origin_bsz:]), dim=1)
             pe = self.pe_embedder(ids)
+            pe_negative = self.pe_embedder(ids_negative)
         else:
             pe = None
+            pe_negative = None
 
         blocks_replace = patches_replace.get("dit", {})
         for i, block in enumerate(self.double_blocks):
@@ -66,6 +70,7 @@ class NAGFlux(Flux):
                                                    txt=args["txt"],
                                                    vec=args["vec"],
                                                    pe=args["pe"],
+                                                   pe_negative=args["pe_negative"],
                                                    attn_mask=args.get("attn_mask"))
                     return out
 
@@ -73,6 +78,7 @@ class NAGFlux(Flux):
                                                            "txt": txt,
                                                            "vec": vec,
                                                            "pe": pe,
+                                                           "pe_negative": pe_negative,
                                                            "attn_mask": attn_mask},
                                                           {"original_block": block_wrap})
                 txt = out["txt"]
@@ -82,6 +88,7 @@ class NAGFlux(Flux):
                                  txt=txt,
                                  vec=vec,
                                  pe=pe,
+                                 pe_negative=pe_negative,
                                  attn_mask=attn_mask)
 
             if control is not None: # Controlnet
@@ -94,7 +101,6 @@ class NAGFlux(Flux):
         if img.dtype == torch.float16:
             img = torch.nan_to_num(img, nan=0.0, posinf=65504, neginf=-65504)
 
-        pe = torch.cat((pe, pe[-origin_bsz:]), dim=0)
         img = torch.cat((img, img[-origin_bsz:]), dim=0)
         img = torch.cat((txt, img), 1)
 
@@ -105,17 +111,19 @@ class NAGFlux(Flux):
                     out["img"] = block(args["img"],
                                        vec=args["vec"],
                                        pe=args["pe"],
+                                       pe_negative=args["pe_negative"],
                                        attn_mask=args.get("attn_mask"))
                     return out
 
                 out = blocks_replace[("single_block", i)]({"img": img,
                                                            "vec": vec,
                                                            "pe": pe,
+                                                           "pe_negative": pe_negative,
                                                            "attn_mask": attn_mask},
                                                           {"original_block": block_wrap})
                 img = out["img"]
             else:
-                img = block(img, vec=vec, pe=pe, attn_mask=attn_mask)
+                img = block(img, vec=vec, pe=pe, pe_negative=pe_negative, attn_mask=attn_mask)
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -147,6 +155,30 @@ class NAGFlux(Flux):
 
             **kwargs,
     ):
+        bs, c, h_orig, w_orig = x.shape
+        patch_size = self.patch_size
+
+        h_len = ((h_orig + (patch_size // 2)) // patch_size)
+        w_len = ((w_orig + (patch_size // 2)) // patch_size)
+        img, img_ids = self.process_img(x)
+        img_tokens = img.shape[1]
+        if ref_latents is not None:
+            h = 0
+            w = 0
+            for ref in ref_latents:
+                h_offset = 0
+                w_offset = 0
+                if ref.shape[-2] + h > ref.shape[-1] + w:
+                    w_offset = w
+                else:
+                    h_offset = h
+
+                kontext, kontext_ids = self.process_img(ref, index=1, h_offset=h_offset, w_offset=w_offset)
+                img = torch.cat([img, kontext], dim=1)
+                img_ids = torch.cat([img_ids, kontext_ids], dim=1)
+                h = max(h, ref.shape[-2] + h_offset)
+                w = max(w, ref.shape[-1] + w_offset)
+
         apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             origin_context_len = context.shape[1]
@@ -176,6 +208,14 @@ class NAGFlux(Flux):
                     ),
                     block,
                 )
+
+            txt_ids = torch.zeros((bs, origin_context_len, 3), device=x.device, dtype=x.dtype)
+            txt_ids_negative = torch.zeros((bs, nag_negative_context.shape[1], 3), device=x.device, dtype=x.dtype)
+            out = self.forward_orig(
+                img, img_ids, context, txt_ids, txt_ids_negative, timestep, y, guidance, control, transformer_options,
+                     attn_mask=kwargs.get("attention_mask", None),
+            )
+
         else:
             self.forward_orig = MethodType(Flux.forward_orig, self)
             for block in self.double_blocks:
@@ -183,33 +223,12 @@ class NAGFlux(Flux):
             for block in self.single_blocks:
                 block.forward = MethodType(SingleStreamBlock.forward, block)
 
-        bs, c, h_orig, w_orig = x.shape
-        patch_size = self.patch_size
+            txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
+            out = self.forward_orig(
+                img, img_ids, context, txt_ids, timestep, y, guidance, control, transformer_options,
+                attn_mask=kwargs.get("attention_mask", None),
+            )
 
-        h_len = ((h_orig + (patch_size // 2)) // patch_size)
-        w_len = ((w_orig + (patch_size // 2)) // patch_size)
-        img, img_ids = self.process_img(x)
-        img_tokens = img.shape[1]
-        if ref_latents is not None:
-            h = 0
-            w = 0
-            for ref in ref_latents:
-                h_offset = 0
-                w_offset = 0
-                if ref.shape[-2] + h > ref.shape[-1] + w:
-                    w_offset = w
-                else:
-                    h_offset = h
-
-                kontext, kontext_ids = self.process_img(ref, index=1, h_offset=h_offset, w_offset=w_offset)
-                img = torch.cat([img, kontext], dim=1)
-                img_ids = torch.cat([img_ids, kontext_ids], dim=1)
-                h = max(h, ref.shape[-2] + h_offset)
-                w = max(w, ref.shape[-1] + w_offset)
-
-        txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
-        out = self.forward_orig(img, img_ids, context, txt_ids, timestep, y, guidance, control, transformer_options,
-                                attn_mask=kwargs.get("attention_mask", None))
         out = out[:, :img_tokens]
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:, :, :h_orig, :w_orig]
 
