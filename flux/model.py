@@ -355,10 +355,14 @@ class NAGFlux(Flux):
             if i == 1:
                 torch._dynamo.graph_break()
                 if can_use_cache:
+                    del first_img_residual
                     img = apply_prev_hidden_states_residual(img)
                     break
                 else:
-                    original_hidden_states = img
+                    set_buffer("first_hidden_states_residual", first_img_residual)
+                    del first_img_residual
+
+                    original_img = img
 
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -396,7 +400,8 @@ class NAGFlux(Flux):
                         img += add
 
             if i == 0:
-                can_use_cache = use_cache(img)
+                first_img_residual = img
+                can_use_cache = use_cache(first_img_residual)
 
         if not can_use_cache:
             if img.dtype == torch.float16:
@@ -437,8 +442,9 @@ class NAGFlux(Flux):
             img = img[:, txt.shape[1] :, ...]
 
             img = img.contiguous()
-            hidden_states_residual = img - original_hidden_states
-            set_buffer("hidden_states_residual", hidden_states_residual)
+            img_residual = img - original_img
+            set_buffer("hidden_states_residual", img_residual)
+            del original_img
 
         torch._dynamo.graph_break()
 
@@ -507,17 +513,12 @@ class NAGFlux(Flux):
                 apply_prev_hidden_states_residual = forward_orig_.__globals__["apply_prev_hidden_states_residual"]
                 closure_vars = get_closure_vars(forward_orig_)
 
-                def use_cache(img):
-                    first_hidden_states_residual = img
+                def use_cache(first_img_residual):
                     can_use_cache = get_can_use_cache(
-                        first_hidden_states_residual,
+                        first_img_residual,
                         threshold=closure_vars["residual_diff_threshold"],
                         validation_function=closure_vars["validate_can_use_cache_function"],
                     )
-                    if not can_use_cache:
-                        set_buffer("first_hidden_states_residual",
-                                   first_hidden_states_residual)
-                    del first_hidden_states_residual
                     return can_use_cache
 
                 self.forward_orig = MethodType(
@@ -529,7 +530,6 @@ class NAGFlux(Flux):
                     ),
                     self,
                 )
-
 
             else:
                 self.forward_orig = MethodType(NAGFlux.forward_orig, self)
