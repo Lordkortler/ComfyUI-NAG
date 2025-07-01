@@ -39,6 +39,22 @@ def check_nag_activation(transformer_options, nag_sigma_end):
     return apply_nag and positive_batch
 
 
+def get_closure_vars(func):
+    if func.__closure__ is None:
+        return {}
+    return {
+        var: cell.cell_contents
+        for var, cell in zip(func.__code__.co_freevars, func.__closure__)
+    }
+
+
+def is_from_wavespeed(func):
+    closure = get_closure_vars(func)
+    return "residual_diff_threshold" in closure \
+        and "validate_can_use_cache_function" in closure
+
+
+# https://github.com/welltop-cn/ComfyUI-TeaCache/blob/4bca908bf53b029ea5739cb69ef2a9e6c06e6752/nodes.py
 def poly1d(coefficients, x):
     result = torch.zeros_like(x)
     for i, coeff in enumerate(coefficients):
