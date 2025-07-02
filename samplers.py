@@ -32,6 +32,7 @@ from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper
 from comfy.ldm.wan.model import WanModel, VaceWanModel
 from comfy.ldm.hunyuan_video.model import HunyuanVideo
+from comfy.ldm.hidream.model import HiDreamImageTransformer2DModel
 
 from .flux.model import NAGFluxSwitch
 from .chroma.model import NAGChromaSwitch
@@ -39,6 +40,7 @@ from .sd.openaimodel import NAGUNetModelSwitch
 from .sd3.mmdit import NAGOpenAISignatureMMDITWrapperSwitch
 from .wan.model import NAGWanModelSwitch
 from .hunyuan_video.model import NAGHunyuanVideoSwitch
+from .hidream.model import NAGHiDreamImageTransformer2DModelSwitch
 
 
 def sample_with_nag(
@@ -133,6 +135,8 @@ class NAGCFGGuider(CFGGuider):
                 switcher_cls = NAGWanModelSwitch
             elif model_type == HunyuanVideo:
                 switcher_cls = NAGHunyuanVideoSwitch
+            elif model_type == HiDreamImageTransformer2DModel:
+                switcher_cls = NAGHiDreamImageTransformer2DModelSwitch
             else:
                 raise ValueError(
                     f"Model type {model_type} is not support for NAGCFGGuider"
