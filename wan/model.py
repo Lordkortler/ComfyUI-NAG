@@ -15,7 +15,7 @@ from comfy.ldm.wan.model import (
     sinusoidal_embedding_1d,
 )
 
-from ..utils import nag, cat_context, check_nag_activation, poly1d
+from ..utils import nag, cat_context, check_nag_activation, poly1d, NAGSwitch
 
 
 class NAGWanT2VCrossAttention(WanT2VCrossAttention):
@@ -700,27 +700,19 @@ class NAGVaceWanModel(VaceWanModel):
         return output
 
 
-def set_nag_wan(
-        model: WanModel,
-        nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
-):
-    nag_model_cls = NAGVaceWanModel if isinstance(model, VaceWanModel) else NAGWanModel
-    model.forward = MethodType(
-        partial(
-            nag_model_cls.forward,
-            nag_negative_context=nag_negative_cond[0][0],
-            nag_sigma_end=nag_sigma_end,
-        ),
-        model,
-    )
-    for name, module in model.named_modules():
-        if "cross_attn" in name and isinstance(module, WanSelfAttention):
-            module.nag_scale = nag_scale
-            module.nag_tau = nag_tau
-            module.nag_alpha = nag_alpha
-
-
-def set_origin_wan(model: NAGWanModel):
-    origin_model_cls = VaceWanModel if isinstance(model, VaceWanModel) else WanModel
-    model.forward = MethodType(origin_model_cls.forward, model)
+class NAGWanModelSwitch(NAGSwitch):
+    def set_nag(self):
+        nag_model_cls = NAGVaceWanModel if isinstance(self.model, VaceWanModel) else NAGWanModel
+        self.model.forward = MethodType(
+            partial(
+                nag_model_cls.forward,
+                nag_negative_context=self.nag_negative_cond[0][0],
+                nag_sigma_end=self.nag_sigma_end,
+            ),
+            self.model,
+        )
+        for name, module in self.model.named_modules():
+            if "cross_attn" in name and isinstance(module, WanSelfAttention):
+                module.nag_scale = self.nag_scale
+                module.nag_tau = self.nag_tau
+                module.nag_alpha = self.nag_alpha

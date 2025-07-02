@@ -54,6 +54,28 @@ def is_from_wavespeed(func):
         and "validate_can_use_cache_function" in closure
 
 
+class NAGSwitch:
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        nag_negative_cond,
+        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+    ):
+        self.model = model
+        self.nag_negative_cond = nag_negative_cond
+        self.nag_scale = nag_scale
+        self.nag_tau = nag_tau
+        self.nag_alpha = nag_alpha
+        self.nag_sigma_end = nag_sigma_end
+        self.origin_forward = model.forward
+
+    def set_nag(self):
+        pass
+
+    def set_origin(self):
+        self.model.forward = self.origin_forward
+
+
 # https://github.com/welltop-cn/ComfyUI-TeaCache/blob/4bca908bf53b029ea5739cb69ef2a9e6c06e6752/nodes.py
 def poly1d(coefficients, x):
     result = torch.zeros_like(x)

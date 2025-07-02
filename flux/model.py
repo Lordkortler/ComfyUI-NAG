@@ -16,7 +16,7 @@ from comfy.ldm.flux.layers import (
 from comfy.ldm.flux.model import Flux
 
 from .layers import NAGDoubleStreamBlock, NAGSingleStreamBlock
-from ..utils import cat_context, check_nag_activation, poly1d, get_closure_vars, is_from_wavespeed
+from ..utils import cat_context, check_nag_activation, poly1d, get_closure_vars, is_from_wavespeed, NAGSwitch
 
 
 class NAGFlux(Flux):
@@ -581,29 +581,22 @@ class NAGFlux(Flux):
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:, :, :h_orig, :w_orig]
 
 
-def set_nag_flux(
-        model: Flux,
-        nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
-):
-    model.forward = MethodType(
-        partial(
-            NAGFlux.forward,
-            nag_negative_context=nag_negative_cond[0][0],
-            nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
-            nag_sigma_end=nag_sigma_end,
-        ),
-        model,
-    )
-    for block in model.double_blocks:
-        block.nag_scale = nag_scale
-        block.nag_tau = nag_tau
-        block.nag_alpha = nag_alpha
-    for block in model.single_blocks:
-        block.nag_scale = nag_scale
-        block.nag_tau = nag_tau
-        block.nag_alpha = nag_alpha
-
-
-def set_origin_flux(model: NAGFlux):
-    model.forward = MethodType(Flux.forward, model)
+class NAGFluxSwitch(NAGSwitch):
+    def set_nag(self):
+        self.model.forward = MethodType(
+            partial(
+                NAGFlux.forward,
+                nag_negative_context=self.nag_negative_cond[0][0],
+                nag_negative_y=self.nag_negative_cond[0][1]["pooled_output"],
+                nag_sigma_end=self.nag_sigma_end,
+            ),
+            self.model,
+        )
+        for block in self.model.double_blocks:
+            block.nag_scale = self.nag_scale
+            block.nag_tau = self.nag_tau
+            block.nag_alpha = self.nag_alpha
+        for block in self.model.single_blocks:
+            block.nag_scale = self.nag_scale
+            block.nag_tau = self.nag_tau
+            block.nag_alpha = self.nag_alpha

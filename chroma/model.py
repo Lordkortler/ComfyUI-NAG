@@ -14,7 +14,7 @@ from comfy.ldm.chroma.layers import (
 from comfy.ldm.chroma.model import Chroma
 
 from .layers import NAGDoubleStreamBlock, NAGSingleStreamBlock
-from ..utils import cat_context, check_nag_activation
+from ..utils import cat_context, check_nag_activation, NAGSwitch
 
 
 class NAGChroma(Chroma):
@@ -231,29 +231,22 @@ class NAGChroma(Chroma):
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
 
 
-def set_nag_chroma(
-        model: Chroma,
-        nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
-):
-    model.forward = MethodType(
-        partial(
-            NAGChroma.forward,
-            nag_negative_context=nag_negative_cond[0][0],
-            nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
-            nag_sigma_end=nag_sigma_end,
-        ),
-        model
-    )
-    for block in model.double_blocks:
-        block.nag_scale = nag_scale
-        block.nag_tau = nag_tau
-        block.nag_alpha = nag_alpha
-    for block in model.single_blocks:
-        block.nag_scale = nag_scale
-        block.nag_tau = nag_tau
-        block.nag_alpha = nag_alpha
-
-
-def set_origin_chroma(model: NAGChroma):
-    model.forward = MethodType(Chroma.forward, model)
+class NAGChromaSwitch(NAGSwitch):
+    def set_nag(self):
+        self.model.forward = MethodType(
+            partial(
+                NAGChroma.forward,
+                nag_negative_context=self.nag_negative_cond[0][0],
+                nag_negative_y=self.nag_negative_cond[0][1]["pooled_output"],
+                nag_sigma_end=self.nag_sigma_end,
+            ),
+            self.model,
+        )
+        for block in self.model.double_blocks:
+            block.nag_scale = self.nag_scale
+            block.nag_tau = self.nag_tau
+            block.nag_alpha = self.nag_alpha
+        for block in self.model.single_blocks:
+            block.nag_scale = self.nag_scale
+            block.nag_tau = self.nag_tau
+            block.nag_alpha = self.nag_alpha

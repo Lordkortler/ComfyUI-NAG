@@ -7,10 +7,10 @@ from comfy.ldm.modules.attention import CrossAttention
 from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
 
 from .attention import NAGCrossAttention
-from ..utils import cat_context, check_nag_activation
+from ..utils import cat_context, check_nag_activation, NAGSwitch
 
 
-class NAGUnetModel(UNetModel):
+class NAGUNetModel(UNetModel):
     def forward(
             self,
             x,
@@ -48,25 +48,18 @@ class NAGUnetModel(UNetModel):
         return output
 
 
-def set_nag_sd(
-        model: UNetModel,
-        nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
-):
-    model.forward = MethodType(
-        partial(
-            NAGUnetModel.forward,
-            nag_negative_context=nag_negative_cond[0][0],
-            nag_sigma_end=nag_sigma_end,
-        ),
-        model
-    )
-    for name, module in model.named_modules():
-        if "attn2" in name and isinstance(module, CrossAttention):
-            module.nag_scale = nag_scale
-            module.nag_tau = nag_tau
-            module.nag_alpha = nag_alpha
-
-
-def set_origin_sd(model: NAGUnetModel):
-    model.forward = MethodType(UNetModel.forward, model)
+class NAGUNetModelSwitch(NAGSwitch):
+    def set_nag(self):
+        self.model.forward = MethodType(
+            partial(
+                NAGUNetModel.forward,
+                nag_negative_context=self.nag_negative_cond[0][0],
+                nag_sigma_end=self.nag_sigma_end,
+            ),
+            self.model
+        )
+        for name, module in self.model.named_modules():
+            if "attn2" in name and isinstance(module, CrossAttention):
+                module.nag_scale = self.nag_scale
+                module.nag_tau = self.nag_tau
+                module.nag_alpha = self.nag_alpha

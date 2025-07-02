@@ -33,12 +33,12 @@ from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper
 from comfy.ldm.wan.model import WanModel, VaceWanModel
 from comfy.ldm.hunyuan_video.model import HunyuanVideo
 
-from .flux.model import set_nag_flux, set_origin_flux
-from .chroma.model import set_nag_chroma, set_origin_chroma
-from .sd.openaimodel import set_nag_sd, set_origin_sd
-from .sd3.mmdit import set_nag_sd3, set_origin_sd3
-from .wan.model import set_nag_wan, set_origin_wan
-from .hunyuan_video.model import set_nag_hunyuan_video, set_origin_hunyuan_video
+from .flux.model import NAGFluxSwitch
+from .chroma.model import NAGChromaSwitch
+from .sd.openaimodel import NAGUNetModelSwitch
+from .sd3.mmdit import NAGOpenAISignatureMMDITWrapperSwitch
+from .wan.model import NAGWanModelSwitch
+from .hunyuan_video.model import NAGHunyuanVideoSwitch
 
 
 def sample_with_nag(
@@ -122,23 +122,17 @@ class NAGCFGGuider(CFGGuider):
                 model = model._orig_mod
             model_type = type(model)
             if model_type == Flux:
-                set_fn = set_nag_flux
-                reset_fn = set_origin_flux
+                switcher_cls = NAGFluxSwitch
             elif model_type == Chroma:
-                set_fn = set_nag_chroma
-                reset_fn = set_origin_chroma
+                switcher_cls = NAGChromaSwitch
             elif model_type == UNetModel:
-                set_fn = set_nag_sd
-                reset_fn = set_origin_sd
+                switcher_cls = NAGUNetModelSwitch
             elif model_type == OpenAISignatureMMDITWrapper:
-                set_fn = set_nag_sd3
-                reset_fn = set_origin_sd3
+                switcher_cls = NAGOpenAISignatureMMDITWrapperSwitch
             elif model_type in [WanModel, VaceWanModel]:
-                set_fn = set_nag_wan
-                reset_fn = set_origin_wan
+                switcher_cls = NAGWanModelSwitch
             elif model_type == HunyuanVideo:
-                set_fn = set_nag_hunyuan_video
-                reset_fn = set_origin_hunyuan_video
+                switcher_cls = NAGHunyuanVideoSwitch
             else:
                 raise ValueError(
                     f"Model type {model_type} is not support for NAGCFGGuider"
@@ -146,11 +140,12 @@ class NAGCFGGuider(CFGGuider):
             self.nag_negative_cond[0][0] = self.nag_negative_cond[0][0].expand(self.batch_size, -1, -1)
             if self.nag_negative_cond[0][1].get("pooled_output", None) is not None:
                 self.nag_negative_cond[0][1]["pooled_output"] = self.nag_negative_cond[0][1]["pooled_output"].expand(self.batch_size, -1)
-            set_fn(
+            switcher = switcher_cls(
                 model,
                 self.nag_negative_cond,
                 self.nag_scale, self.nag_tau, self.nag_alpha, self.nag_sigma_end,
             )
+            switcher.set_nag()
 
         try:
             orig_model_options = self.model_options
@@ -174,7 +169,7 @@ class NAGCFGGuider(CFGGuider):
             self.model_patcher.restore_hook_patches()
 
         if apply_guidance:
-            reset_fn(model)
+            switcher.set_origin()
 
         del self.conds
         del self.nag_negative_cond

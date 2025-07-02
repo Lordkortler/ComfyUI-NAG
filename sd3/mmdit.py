@@ -12,7 +12,7 @@ from comfy.ldm.modules.diffusionmodules.mmdit import (
     default,
 )
 
-from ..utils import nag, cat_context, check_nag_activation
+from ..utils import nag, cat_context, check_nag_activation, NAGSwitch
 
 
 def _nag_block_mixing(
@@ -218,24 +218,17 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
         return x[:, :, :hw[-2], :hw[-1]]
 
 
-def set_nag_sd3(
-        model: OpenAISignatureMMDITWrapper,
-        nag_negative_cond,
-        nag_scale, nag_tau, nag_alpha, nag_sigma_end,
-):
-    model.nag_scale = nag_scale
-    model.nag_tau = nag_tau
-    model.nag_alpha = nag_alpha
-    model.forward = MethodType(
-        partial(
-            NAGOpenAISignatureMMDITWrapper.forward,
-            nag_negative_context=nag_negative_cond[0][0],
-            nag_negative_y=nag_negative_cond[0][1]["pooled_output"],
-            nag_sigma_end=nag_sigma_end,
-        ),
-        model
-    )
-
-
-def set_origin_sd3(model: NAGOpenAISignatureMMDITWrapper):
-    model.forward = MethodType(OpenAISignatureMMDITWrapper.forward, model)
+class NAGOpenAISignatureMMDITWrapperSwitch(NAGSwitch):
+    def set_nag(self):
+        self.model.nag_scale = self.nag_scale
+        self.model.nag_tau = self.nag_tau
+        self.model.nag_alpha = self.nag_alpha
+        self.model.forward = MethodType(
+            partial(
+                NAGOpenAISignatureMMDITWrapper.forward,
+                nag_negative_context=self.nag_negative_cond[0][0],
+                nag_negative_y=self.nag_negative_cond[0][1]["pooled_output"],
+                nag_sigma_end=self.nag_sigma_end,
+            ),
+            self.model
+        )
