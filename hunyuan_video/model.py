@@ -638,10 +638,11 @@ class NAGHunyuanVideo(HunyuanVideo):
         apply_nag = check_nag_activation(transformer_options, nag_sigma_end)
         if apply_nag:
             origin_context_len = context.shape[1]
+            nag_bsz, nag_negative_context_len = nag_negative_context.shape[:2]
             context = cat_context(context, nag_negative_context, trim_context=True)
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
             context_pad_len = context.shape[1] - origin_context_len
-            nag_pad_len = context.shape[1] - nag_negative_context.shape[1]
+            nag_pad_len = context.shape[1] - nag_negative_context_len
 
             forward_orig_ = self.forward_orig
             double_blocks_forward = list()
@@ -700,7 +701,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                     partial(
                         NAGSingleStreamBlock.forward,
                         img_length=img_ids.shape[1],
-                        origin_bsz=nag_negative_context.shape[0],
+                        origin_bsz=nag_bsz,
                         context_pad_len=context_pad_len,
                         nag_pad_len=nag_pad_len,
                     ),
@@ -708,7 +709,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                 )
 
             txt_ids = torch.zeros((bs, origin_context_len, 3), device=x.device, dtype=x.dtype)
-            txt_ids_negative = torch.zeros((bs, nag_negative_context.shape[1], 3), device=x.device, dtype=x.dtype)
+            txt_ids_negative = torch.zeros((nag_bsz, nag_negative_context_len, 3), device=x.device, dtype=x.dtype)
             out = self.forward_orig(
                 x, img_ids, context, txt_ids, txt_ids_negative, attention_mask, timestep, y, guidance, guiding_frame_index, ref_latent,
                 control=control, transformer_options=transformer_options,
