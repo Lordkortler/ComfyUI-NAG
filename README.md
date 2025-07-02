@@ -18,6 +18,8 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## News
 
+2025-07-02: `HiDream` is now supported!
+
 2025-07-02: Add support for `TeaCache` and `WaveSpeed` to accelerate NAG sampling!
 
 2025-06-30: Fix a major bug affecting `Flux`, `Flux Kontext` and `Chroma`, resulting in degraded guidance. Please update your NAG node!
