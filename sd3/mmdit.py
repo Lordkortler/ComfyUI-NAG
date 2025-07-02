@@ -200,7 +200,7 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
                     out = {}
-                    out["txt"], out["img"] = joint_blockss[i](args["txt"], args["img"], c=args["vec"])
+                    out["txt"], out["img"] = joint_blocks[i](args["txt"], args["img"], c=args["vec"])
                     return out
 
                 out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": c_mod}, {"original_block": block_wrap})
