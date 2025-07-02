@@ -1,6 +1,7 @@
 from typing import Optional
 from types import MethodType
 from functools import partial
+from typing import Callable
 
 import torch
 from einops import repeat
@@ -153,6 +154,86 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
         x = self.final_layer(x, c_mod[:len(x)])  # (N, T, patch_size ** 2 * out_channels)
         return x
 
+    def forward_core_with_concat_with_wavespeed(
+        self,
+        x: torch.Tensor,
+        c_mod: torch.Tensor,
+        context: Optional[torch.Tensor] = None,
+        control = None,
+        transformer_options = {},
+        use_cache: Callable = None,
+        apply_prev_hidden_states_residual: Callable = None,
+        set_buffer: Callable = None,
+    ) -> torch.Tensor:
+        patches_replace = transformer_options.get("patches_replace", {})
+        if self.register_length > 0:
+            context = torch.cat(
+                (
+                    repeat(self.register, "1 ... -> b ...", b=x.shape[0]),
+                    default(context, torch.Tensor([]).type_as(x)),
+                ),
+                1,
+            )
+
+        # context is B, L', D
+        # x is B, L, D
+        blocks_replace = patches_replace.get("dit", {})
+        joint_blocks = self.joint_blocks[0].transformer_blocks
+        blocks = len(joint_blocks)
+
+        original_x = x
+        can_use_cache = False
+
+        for i in range(blocks):
+            if i == 1:
+                torch._dynamo.graph_break()
+                if can_use_cache:
+                    del first_x_residual
+                    x = apply_prev_hidden_states_residual(x)
+                    break
+                else:
+                    set_buffer("first_hidden_states_residual", first_x_residual)
+                    del first_x_residual
+
+                    original_x = x
+
+            if ("double_block", i) in blocks_replace:
+                def block_wrap(args):
+                    out = {}
+                    out["txt"], out["img"] = joint_blockss[i](args["txt"], args["img"], c=args["vec"])
+                    return out
+
+                out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": c_mod}, {"original_block": block_wrap})
+                context = out["txt"]
+                x = out["img"]
+            else:
+                context, x = joint_blocks[i](
+                    context,
+                    x,
+                    c=c_mod,
+                    use_checkpoint=self.use_checkpoint,
+                )
+            if control is not None:
+                control_o = control.get("output")
+                if i < len(control_o):
+                    add = control_o[i]
+                    if add is not None:
+                        x += add
+
+            if i == 0:
+                first_x_residual = x - original_x
+                can_use_cache = use_cache(first_x_residual)
+                del original_x
+
+        if not can_use_cache:
+            x = x.contiguous()
+            x_residual = x - original_x
+            set_buffer("hidden_states_residual", x_residual)
+        torch._dynamo.graph_break()
+
+        x = self.final_layer(x, c_mod[:len(x)])  # (N, T, patch_size ** 2 * out_channels)
+        return x
+
     def forward(
             self,
             x: torch.Tensor,
@@ -176,8 +257,38 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
             forward_core_with_concat_ = self.forward_core_with_concat
             joint_blocks_forward = list()
 
-            self.forward_core_with_concat = MethodType(NAGOpenAISignatureMMDITWrapper.forward_core_with_concat, self)
-            for block in self.joint_blocks:
+            joint_blocks = self.joint_blocks
+            is_wavespeed = "CachedTransformerBlocks" in type(joint_blocks[0]).__name__
+            if is_wavespeed:  # chengzeyi/Comfy-WaveSpeed
+                cached_blocks = self.joint_blocks[0]
+                joint_blocks = cached_blocks.transformer_blocks
+
+            if is_wavespeed:
+                get_can_use_cache = cached_blocks.forward.__globals__["get_can_use_cache"]
+                set_buffer = cached_blocks.forward.__globals__["set_buffer"]
+                apply_prev_hidden_states_residual = cached_blocks.forward.__globals__["apply_prev_hidden_states_residual"]
+
+                def use_cache(first_hidden_states_residual):
+                    return get_can_use_cache(
+                        first_hidden_states_residual,
+                        threshold=cached_blocks.residual_diff_threshold,
+                        validation_function=cached_blocks.validate_can_use_cache_function,
+                    )
+
+                self.forward_core_with_concat = MethodType(
+                    partial(
+                        NAGOpenAISignatureMMDITWrapper.forward_core_with_concat_with_wavespeed,
+                        use_cache=use_cache,
+                        apply_prev_hidden_states_residual=apply_prev_hidden_states_residual,
+                        set_buffer=set_buffer,
+                    ),
+                    self,
+                )
+
+            else:
+                self.forward_core_with_concat = MethodType(NAGOpenAISignatureMMDITWrapper.forward_core_with_concat, self)
+
+            for block in joint_blocks:
                 joint_blocks_forward.append(block.forward)
                 block.forward = MethodType(
                     partial(
@@ -211,7 +322,7 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
 
         if apply_nag:
             self.forward_core_with_concat = forward_core_with_concat_
-            for block in self.joint_blocks:
+            for block in joint_blocks:
                 block.forward = joint_blocks_forward.pop(0)
 
         x = self.unpatchify(x, hw=hw)  # (N, out_channels, H, W)

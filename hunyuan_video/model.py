@@ -543,7 +543,6 @@ class NAGHunyuanVideo(HunyuanVideo):
                 first_img_residual = img - original_img
                 can_use_cache = use_cache(first_img_residual)
                 del original_img
-                print(can_use_cache)
 
         if not can_use_cache:
             img = torch.cat((img, img[-origin_bsz:]), dim=0)
