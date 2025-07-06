@@ -73,6 +73,10 @@ class NAGCFGGuider(CFGGuider):
         self.nag_sigma_end = 0.
         self.batch_size = 1
 
+    def set_conds(self, positive, negative=None):
+        self.inner_set_conds(
+            {"positive": positive, "negative": negative} if negative is not None else {"positive": positive})
+
     def set_batch_size(self, batch_size):
         self.batch_size = batch_size
 
