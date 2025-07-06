@@ -18,7 +18,10 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## News
 
-2025-07-06: Add `KSamplerWithNAG (Advanced)` as a drop-in replacement for `KSampler (Advanced)`, and node `NAGGuider` for `BasicGuider`.
+2025-07-06: Add three new nodes:
+- `KSamplerWithNAG (Advanced)` as a drop-in replacement for `KSampler (Advanced)`.
+- `SamplerCustomWithNAG` for `SamplerCustom`.
+- `NAGGuider` for `BasicGuider`.
 
 2025-07-02: `HiDream` is now supported!
 
@@ -36,12 +39,17 @@ Flux-Dev Demo: https://huggingface.co/spaces/ChenDY/NAG_FLUX.1-dev
 
 ## Nodes
 
-- `NAGCFGGuider`
-- `KSamplerWithNAG`
+- `KSamplerWithNAG`, `KSamplerWithNAG (Advanced)`, `SamplerCustomWithNAG`
+- `BasicGuider`, `NAGCFGGuider`
 
 ## Usage
 
-To use NAG, simply replace the `CFGGuider` node with `NAGCFGGuider`, or the `KSampler` node with `KSamplerWithNAG` in your workflow.
+To use NAG, simply replace
+- `KSampler` with `KSamplerWithNAG`.
+- `KSamplerWithNAG (Advanced)` with `KSampler (Advanced)`.
+- `SamplerCustomWithNAG` with `SamplerCustom`.
+- `NAGGuider` with `BasicGuider`.
+- `CFGGuider` with `NAGCFGGuider`.
 
 We currently support `Flux`, `Flux Kontext`, `Wan`, `Vace Wan`, `Hunyuan Video`, `Choroma`, `SD3.5`, `SDXL` and `SD`.
 
