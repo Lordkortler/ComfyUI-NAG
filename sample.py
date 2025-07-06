@@ -1,5 +1,6 @@
 import comfy
 from .samplers import KSamplerWithNAG
+from .samplers import sample_with_nag as samplers_sample_with_nag
 
 
 def sample_with_nag(
@@ -12,6 +13,19 @@ def sample_with_nag(
         latent_image=latent_image,
         start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise,
         denoise_mask=noise_mask, sigmas=sigmas, callback=callback, disable_pbar=disable_pbar, seed=seed,
+    )
+    samples = samples.to(comfy.model_management.intermediate_device())
+    return samples
+
+
+def sample_custom_with_nag(
+        model, noise, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler, sigmas, positive, negative, nag_negative, latent_image, noise_mask=None, callback=None, disable_pbar=False, seed=None):
+    samples = samplers_sample_with_nag(
+        model, noise, positive, negative, nag_negative,
+        cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+        model.load_device, sampler, sigmas,
+        model_options=model.model_options, latent_image=latent_image, denoise_mask=noise_mask,
+        callback=callback, disable_pbar=disable_pbar, seed=seed,
     )
     samples = samples.to(comfy.model_management.intermediate_device())
     return samples

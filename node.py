@@ -1,9 +1,10 @@
 import torch
 import comfy
+from comfy_extras.nodes_custom_sampler import Noise_EmptyNoise, Noise_RandomNoise
 import latent_preview
 
 from .samplers import NAGCFGGuider as samplers_NAGCFGGuider
-from .sample import sample_with_nag
+from .sample import sample_with_nag, sample_custom_with_nag
 
 
 def common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler_name,
@@ -220,9 +221,80 @@ class KSamplerAdvancedWithNAG:
         )
 
 
+class SamplerCustomWithNAG:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL",),
+            "add_noise": ("BOOLEAN", {"default": True}),
+            "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
+            "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+            "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+            "nag_tau": ("FLOAT", {"default": 2.5, "min": 1.0, "max": 10.0, "step": 0.1, "round": 0.01}),
+            "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01, "round": 0.01}),
+            "nag_sigma_end": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 20.0, "step": 0.01, "round": 0.01}),
+            "positive": ("CONDITIONING",),
+            "negative": ("CONDITIONING",),
+            "nag_negative": ("CONDITIONING", {
+                "tooltip": "The conditioning describing the attributes you want to exclude from the image for NAG."}),
+            "sampler": ("SAMPLER",),
+            "sigmas": ("SIGMAS",),
+            "latent_image": ("LATENT",),
+        }}
+
+    RETURN_TYPES = ("LATENT", "LATENT")
+    RETURN_NAMES = ("output", "denoised_output")
+
+    FUNCTION = "sample"
+
+    CATEGORY = "sampling/custom_sampling"
+
+    def sample(
+            self,
+            model, add_noise, noise_seed, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+            positive, negative, nag_negative,
+            sampler, sigmas, latent_image,
+    ):
+        latent = latent_image
+        latent_image = latent["samples"]
+        latent = latent.copy()
+        latent_image = comfy.sample.fix_empty_latent_channels(model, latent_image)
+        latent["samples"] = latent_image
+
+        if not add_noise:
+            noise = Noise_EmptyNoise().generate_noise(latent)
+        else:
+            noise = Noise_RandomNoise(noise_seed).generate_noise(latent)
+
+        noise_mask = None
+        if "noise_mask" in latent:
+            noise_mask = latent["noise_mask"]
+
+        x0_output = {}
+        callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+        samples = sample_custom_with_nag(
+            model, noise, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end,
+            sampler, sigmas, positive, negative, nag_negative,
+            latent_image,
+            noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed,
+        )
+
+        out = latent.copy()
+        out["samples"] = samples
+        if "x0" in x0_output:
+            out_denoised = latent.copy()
+            out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
+        else:
+            out_denoised = out
+        return (out, out_denoised)
+
+
 NODE_CLASS_MAPPINGS = {
     "NAGGuider": NAGGuider,
     "NAGCFGGuider": NAGCFGGuider,
     "KSamplerWithNAG": KSamplerWithNAG,
     "KSamplerWithNAG (Advanced)": KSamplerAdvancedWithNAG,
+    "SamplerCustomWithNAG": SamplerCustomWithNAG,
 }
