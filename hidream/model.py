@@ -325,10 +325,11 @@ class NAGHiDreamImageTransformer2DModel(HiDreamImageTransformer2DModel):
         if apply_nag:
             y = torch.cat((y, nag_negative_y.to(y)), dim=0)
             context = cat_context(context, nag_negative_context)
-            encoder_hidden_states_llama3 = torch.cat((
-                encoder_hidden_states_llama3,
-                nag_negative_encoder_hidden_states_llama.to(encoder_hidden_states_llama3),
-            ), dim=0)
+            encoder_hidden_states_llama3 = cat_context(
+                encoder_hidden_states_llama3, nag_negative_encoder_hidden_states_llama,
+                trim_context=True,
+                dim=2,
+            )
 
             forward_nag_ = self.forward_nag
             blocks_forward = list()
