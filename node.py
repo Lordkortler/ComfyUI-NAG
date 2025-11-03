@@ -9,7 +9,7 @@ from .sample import sample_with_nag, sample_custom_with_nag
 
 def common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_alpha, nag_sigma_end, sampler_name,
                              scheduler, positive, negative, nag_negative, latent, denoise=1.0, disable_noise=False,
-                             start_step=None, last_step=None, force_full_denoise=False):
+                             start_step=None, last_step=None, force_full_denoise=False, **kwargs):
     latent_image = latent["samples"]
     latent_image = comfy.sample.fix_empty_latent_channels(model, latent_image)
 
@@ -30,7 +30,7 @@ def common_ksampler_with_nag(model, seed, steps, cfg, nag_scale, nag_tau, nag_al
         negative, nag_negative, latent_image,
         denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
         force_full_denoise=force_full_denoise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar,
-        seed=seed,
+        seed=seed, **kwargs,
     )
     out = latent.copy()
     out["samples"] = samples

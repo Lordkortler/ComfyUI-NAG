@@ -108,6 +108,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                     "attention_mask": attn_mask,
                     'modulation_dims_img': modulation_dims,
                     'modulation_dims_txt': modulation_dims_txt,
+                    'transformer_options': transformer_options,
                 }, {"original_block": block_wrap})
                 txt = out["txt"]
                 img = out["img"]
@@ -154,6 +155,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                     "pe_negative": pe_negative,
                     "attention_mask": attn_mask,
                     'modulation_dims': modulation_dims,
+                    'transformer_options': transformer_options,
                 }, {"original_block": block_wrap})
                 img = out["img"]
             else:
@@ -317,6 +319,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                         "attention_mask": attn_mask,
                         'modulation_dims_img': modulation_dims,
                         'modulation_dims_txt': modulation_dims_txt,
+                        'transformer_options': transformer_options,
                     }, {"original_block": block_wrap})
                     txt = out["txt"]
                     img = out["img"]
@@ -363,6 +366,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                         "pe_negative": pe_negative,
                         "attention_mask": attn_mask,
                         'modulation_dims': modulation_dims,
+                        'transformer_options': transformer_options,
                     }, {"original_block": block_wrap})
                     img = out["img"]
                 else:
@@ -517,6 +521,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                     "attention_mask": attn_mask,
                     'modulation_dims_img': modulation_dims,
                     'modulation_dims_txt': modulation_dims_txt,
+                    'transformer_options': transformer_options,
                 }, {"original_block": block_wrap})
                 txt = out["txt"]
                 img = out["img"]
@@ -569,6 +574,7 @@ class NAGHunyuanVideo(HunyuanVideo):
                         "pe_negative": pe_negative,
                         "attention_mask": attn_mask,
                         'modulation_dims': modulation_dims,
+                        'transformer_options': transformer_options,
                     }, {"original_block": block_wrap})
                     img = out["img"]
                 else:

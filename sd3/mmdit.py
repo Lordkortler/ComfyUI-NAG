@@ -134,7 +134,11 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
                     out["txt"], out["img"] = self.joint_blocks[i](args["txt"], args["img"], c=args["vec"])
                     return out
 
-                out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": c_mod}, {"original_block": block_wrap})
+                out = blocks_replace[("double_block", i)]({"img": x,
+                                                           "txt": context,
+                                                           "vec": c_mod,
+                                                           "transformer_options": transformer_options},
+                                                          {"original_block": block_wrap})
                 context = out["txt"]
                 x = out["img"]
             else:
@@ -203,7 +207,11 @@ class NAGOpenAISignatureMMDITWrapper(OpenAISignatureMMDITWrapper):
                     out["txt"], out["img"] = joint_blocks[i](args["txt"], args["img"], c=args["vec"])
                     return out
 
-                out = blocks_replace[("double_block", i)]({"img": x, "txt": context, "vec": c_mod}, {"original_block": block_wrap})
+                out = blocks_replace[("double_block", i)]({"img": x,
+                                                           "txt": context,
+                                                           "vec": c_mod,
+                                                           "transformer_options": transformer_options},
+                                                          {"original_block": block_wrap})
                 context = out["txt"]
                 x = out["img"]
             else:

@@ -88,7 +88,8 @@ class NAGChroma(Chroma):
                                                                "vec": double_mod,
                                                                "pe": pe,
                                                                "pe_negative": pe_negative,
-                                                               "attn_mask": attn_mask},
+                                                               "attn_mask": attn_mask,
+                                                               "transformer_options": transformer_options},
                                                               {"original_block": block_wrap})
                     txt = out["txt"]
                     img = out["img"]
@@ -127,11 +128,13 @@ class NAGChroma(Chroma):
                                                                "vec": single_mod,
                                                                "pe": pe,
                                                                "pe_negative": pe_negative,
-                                                               "attn_mask": attn_mask},
+                                                               "attn_mask": attn_mask,
+                                                               "transformer_options": transformer_options},
                                                               {"original_block": block_wrap})
                     img = out["img"]
                 else:
-                    img = block(img, vec=single_mod, pe=pe, pe_negative=pe_negative, attn_mask=attn_mask)
+                    img = block(img, vec=single_mod, pe=pe, pe_negative=pe_negative,
+                                attn_mask=attn_mask)
 
                 if control is not None: # Controlnet
                     control_o = control.get("output")

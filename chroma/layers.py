@@ -31,6 +31,8 @@ class NAGDoubleStreamBlock(DoubleStreamBlock):
             attn_mask=None,
             context_pad_len: int = 0,
             nag_pad_len: int = 0,
+            transformer_options=None,
+            **kwargs,
     ):
         origin_bsz = len(txt) - len(img)
         assert origin_bsz != 0
@@ -126,6 +128,8 @@ class NAGSingleStreamBlock(SingleStreamBlock):
             origin_bsz: int = None,
             context_pad_len: int = 0,
             nag_pad_len: int = 0,
+            transformer_options=None,
+            **kwargs,
     ) -> Tensor:
         mod = vec
         x_mod = torch.addcmul(mod.shift, 1 + mod.scale, self.pre_norm(x))

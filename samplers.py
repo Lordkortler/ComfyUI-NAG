@@ -54,13 +54,25 @@ def sample_with_nag(
         sigmas,
         model_options={},
         latent_image=None, denoise_mask=None, callback=None, disable_pbar=False, seed=None,
+        latent_shapes=None, **kwargs,
 ):
     guider = NAGCFGGuider(model)
     guider.set_conds(positive, negative)
     guider.set_cfg(cfg)
     guider.set_batch_size(latent_image.shape[0])
     guider.set_nag(nag_negative, nag_scale, nag_tau, nag_alpha, nag_sigma_end)
-    return guider.sample(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed)
+    return guider.sample(
+        noise,
+        latent_image,
+        sampler,
+        sigmas,
+        denoise_mask=denoise_mask,
+        callback=callback,
+        disable_pbar=disable_pbar,
+        seed=seed,
+        latent_shapes=latent_shapes,
+        **kwargs,
+    )
 
 
 class NAGCFGGuider(CFGGuider):
@@ -90,7 +102,7 @@ class NAGCFGGuider(CFGGuider):
     def __call__(self, *args, **kwargs):
         return self.predict_noise(*args, **kwargs)
 
-    def inner_sample(self, noise, latent_image, device, sampler, sigmas, denoise_mask, callback, disable_pbar, seed):
+    def inner_sample(self, noise, latent_image, device, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes=None, **kwargs):
         if latent_image is not None and torch.count_nonzero(latent_image) > 0: #Don't shift the empty latent image.
             latent_image = self.inner_model.process_latent_in(latent_image)
 
@@ -105,10 +117,19 @@ class NAGCFGGuider(CFGGuider):
             sampler,
             comfy.patcher_extension.get_all_wrappers(comfy.patcher_extension.WrappersMP.SAMPLER_SAMPLE, extra_args["model_options"], is_model_options=True)
         )
-        samples = executor.execute(self, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar)
+        samples = executor.execute(
+            self,
+            sigmas,
+            extra_args,
+            callback,
+            noise,
+            latent_image,
+            denoise_mask,
+            disable_pbar,
+        )
         return self.inner_model.process_latent_out(samples.to(torch.float32))
 
-    def sample(self, noise, latent_image, sampler, sigmas, denoise_mask=None, callback=None, disable_pbar=False, seed=None):
+    def sample(self, noise, latent_image, sampler, sigmas, denoise_mask=None, callback=None, disable_pbar=False, seed=None, latent_shapes=None, **kwargs):
         if sigmas.shape[-1] == 0:
             return latent_image
 
@@ -169,7 +190,16 @@ class NAGCFGGuider(CFGGuider):
                 self,
                 comfy.patcher_extension.get_all_wrappers(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, self.model_options, is_model_options=True)
             )
-            output = executor.execute(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed)
+            output = executor.execute(
+                noise,
+                latent_image,
+                sampler,
+                sigmas,
+                denoise_mask,
+                callback,
+                disable_pbar,
+                seed,
+            )
         finally:
             cast_to_load_options(self.model_options, device=self.model_patcher.offload_device)
             self.model_options = orig_model_options
@@ -195,6 +225,8 @@ class KSamplerWithNAG(KSampler):
             start_step=None, last_step=None, force_full_denoise=False,
             denoise_mask=None,
             sigmas=None, callback=None, disable_pbar=False, seed=None,
+            latent_shapes=None,
+            **kwargs,
     ):
         if sigmas is None:
             sigmas = self.sigmas
@@ -225,6 +257,12 @@ class KSamplerWithNAG(KSampler):
             sampler,
             sigmas,
             self.model_options,
-            latent_image=latent_image, denoise_mask=denoise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed,
+            latent_image=latent_image,
+            denoise_mask=denoise_mask,
+            callback=callback,
+            disable_pbar=disable_pbar,
+            seed=seed,
+            latent_shapes=latent_shapes,
+            **kwargs,
         )
 

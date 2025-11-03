@@ -87,9 +87,11 @@ class NAGWanI2VCrossAttention(WanI2VCrossAttention):
             self,
             x,
             context,
-            context_img_len,
+            context_img_len=None,
             context_pad_len: int = None,
             nag_pad_len: int = None,
+            transformer_options=None,
+            **kwargs,
     ):
         r"""
         Args:
